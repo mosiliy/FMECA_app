@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# Local / secrets
+.env
+# SQLite (создаётся приложением локально)
+data/*.db
+!data/.gitkeep
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Test / tooling
+.pytest_cache/
+*.egg-info/
+htmlcov/
+
+# Accidental outputs
+_mil_matrix_smoke.png
