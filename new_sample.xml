@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fmea>
+    <!-- ════════════════════════════════════════════════════════════════
+         СЕРВЕРНОЕ ОБОРУДОВАНИЕ
+         ════════════════════════════════════════════════════════════════ -->
+    
+    <!-- 1. Процессор сервера -->
+    <failure>
+        <system>Сервер Dell PowerEdge R740</system>
+        <subsystem>Процессорный модуль</subsystem>
+        <component>CPU Intel Xeon Gold 6154 (18 ядер, 3.0 GHz)</component>
+        <category>Процессор</category>
+        <mode>Перегрев процессора выше 95°C</mode>
+        <cause>Отказ вентилятора системы охлаждения</cause>
+        <effect>Троттлинг, снижение производительности на 40%, риск аварийного отключения</effect>
+        <severity>8</severity>
+        <occurrence>4</occurrence>
+        <detection>3</detection>
+    </failure>
+
+    <!-- 2. Оперативная память -->
+    <failure>
+        <system>Сервер Dell PowerEdge R740</system>
+        <subsystem>Подсистема памяти</subsystem>
+        <component>DDR4 ECC RDIMM 32GB Samsung M393A4K40CB2-CTD</component>
+        <category>Оперативная память</category>
+        <mode>Ошибки чтения/записи данных (битовые ошибки)</mode>
+        <cause>Деградация ячеек памяти из-за интенсивной эксплуатации</cause>
+        <effect>Потеря данных, сбой приложений, kernel panic</effect>
+        <severity>9</severity>
+        <occurrence>3</occurrence>
+        <detection>5</detection>
+    </failure>
+
+    <!-- 3. SSD накопитель -->
+    <failure>
+        <system>Сервер Dell PowerEdge R740</system>
+        <subsystem>Подсистема хранения данных</subsystem>
+        <component>SSD Samsung 970 EVO Plus NVMe 1TB</component>
+        <category>Накопитель</category>
+        <mode>Полный отказ накопителя (read-only mode)</mode>
+        <cause>Исчерпание ресурса перезаписи (TBW limit)</cause>
+        <effect>Потеря всех данных на диске, остановка работы системы</effect>
+        <severity>10</severity>
+        <occurrence>2</occurrence>
+        <detection>7</detection>
+    </failure>
+
+    <!-- 4. Блок питания сервера -->
+    <failure>
+        <system>Сервер Dell PowerEdge R740</system>
+        <subsystem>Система электропитания</subsystem>
+        <component>PSU 750W 80+ Platinum Hot-Plug</component>
+        <category>Блок питания</category>
+        <mode>Скачки напряжения на выходе (+/-15%)</mode>
+        <cause>Деградация электролитических конденсаторов</cause>
+        <effect>Повреждение материнской платы, процессора, памяти</effect>
+        <severity>9</severity>
+        <occurrence>3</occurrence>
+        <detection>4</detection>
+    </failure>
+
+    <!-- 5. Материнская плата сервера -->
+    <failure>
+        <system>Сервер Dell PowerEdge R740</system>
+        <subsystem>Системная плата</subsystem>
+        <component>Dell PowerEdge R740 Motherboard (LGA3647)</component>
+        <category>Материнская плата</category>
+        <mode>Отказ контроллера PCIe</mode>
+        <cause>Статическое электричество (ESD) при обслуживании</cause>
+        <effect>Неработоспособность слотов расширения, отказ сетевых карт</effect>
+        <severity>7</severity>
+        <occurrence>2</occurrence>
+        <detection>3</detection>
+    </failure>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         СИСТЕМА ХРАНЕНИЯ ДАННЫХ
+         ════════════════════════════════════════════════════════════════ -->
+
+    <!-- 6. RAID-контроллер -->
+    <failure>
+        <system>Система хранения данных NetApp FAS2750</system>
+        <subsystem>RAID-контроллер</subsystem>
+        <component>LSI MegaRAID 9361-8i SAS/SATA</component>
+        <category>Сетевое оборудование</category>
+        <mode>Программный сбой контроллера (firmware crash)</mode>
+        <cause>Ошибка в микропрограмме версии 4.680.00</cause>
+        <effect>Нестабильная работа RAID-массива, риск потери данных</effect>
+        <severity>8</severity>
+        <occurrence>4</occurrence>
+        <detection>5</detection>
+    </failure>
+
+    <!-- 7. HDD накопитель -->
+    <failure>
+        <system>Система хранения данных NetApp FAS2750</system>
+        <subsystem>Дисковая полка</subsystem>
+        <component>HDD Seagate Exos X16 16TB (ST16000NM001G)</component>
+        <category>Накопитель</category>
+        <mode>Увеличение количества BAD-секторов (>100)</mode>
+        <cause>Вибрация и удары при транспортировке</cause>
+        <effect>Деградация производительности, риск полного отказа</effect>
+        <severity>7</severity>
+        <occurrence>5</occurrence>
+        <detection>4</detection>
+    </failure>
+
+    <!-- 8. Кабель SAS -->
+    <failure>
+        <system>Система хранения данных NetApp FAS2750</system>
+        <subsystem>Межсоединения</subsystem>
+        <component>SAS кабель 12Gb/s Mini-SAS HD 2м</component>
+        <category>Сетевое оборудование</category>
+        <mode>Физическое повреждение разъёма</mode>
+        <cause>Многократное переподключение, механический износ</cause>
+        <effect>Потеря соединения с дисковой полкой, недоступность данных</effect>
+        <severity>6</severity>
+        <occurrence>4</occurrence>
+        <detection>2</detection>
+    </failure>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         РАБОЧАЯ СТАНЦИЯ
+         ════════════════════════════════════════════════════════════════ -->
+
+    <!-- 9. Процессор рабочей станции -->
+    <failure>
+        <system>Рабочая станция HP Z8 G4</system>
+        <subsystem>Процессорный модуль</subsystem>
+        <component>CPU Intel Xeon Platinum 8280 (28 ядер, 2.7 GHz)</component>
+        <category>Процессор</category>
+        <mode>Деградация производительности (снижение частоты)</mode>
+        <cause>Перегрузка по току из-за неисправности VRM</cause>
+        <effect>Снижение производительности на 25%, нестабильная работа</effect>
+        <severity>6</severity>
+        <occurrence>5</occurrence>
+        <detection>3</detection>
+    </failure>
+
+    <!-- 10. Графический процессор -->
+    <failure>
+        <system>Рабочая станция HP Z8 G4</system>
+        <subsystem>Графическая подсистема</subsystem>
+        <component>NVIDIA Quadro RTX 6000 24GB GDDR6</component>
+        <category>Вычислительная система</category>
+        <mode>Артефакты изображения, зависание при рендеринге</mode>
+        <cause>Перегрев GPU выше 85°C из-за засорения радиатора</cause>
+        <effect>Невозможность выполнения графических задач, потеря производительности</effect>
+        <severity>7</severity>
+        <occurrence>6</occurrence>
+        <detection>3</detection>
+    </failure>
+
+    <!-- 11. Блок питания рабочей станции -->
+    <failure>
+        <system>Рабочая станция HP Z8 G4</system>
+        <subsystem>Система питания</subsystem>
+        <component>PSU 1125W 80+ Platinum</component>
+        <category>Блок питания</category>
+        <mode>Полный отказ блока питания</mode>
+        <cause>Перегрузка по мощности (работа на пределе 90%+ длительное время)</cause>
+        <effect>Невозможность включения системы, риск повреждения компонентов</effect>
+        <severity>8</severity>
+        <occurrence>3</occurrence>
+        <detection>6</detection>
+    </failure>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         СЕТЕВОЕ ОБОРУДОВАНИЕ
+         ════════════════════════════════════════════════════════════════ -->
+
+    <!-- 12. Коммутатор -->
+    <failure>
+        <system>Сетевая инфраструктура ЦОД</system>
+        <subsystem>Core Switch</subsystem>
+        <component>Cisco Catalyst 9500-48Y4C (48x25G + 4x100G)</component>
+        <category>Сетевое оборудование</category>
+        <mode>Отказ модуля питания (PSU A)</mode>
+        <cause>Скачок напряжения в электросети 380В</cause>
+        <effect>Переход на резервное питание, риск полного отключения при отказе PSU B</effect>
+        <severity>7</severity>
+        <occurrence>3</occurrence>
+        <detection>2</detection>
+    </failure>
+
+    <!-- 13. Сетевая карта -->
+    <failure>
+        <system>Сервер HPE ProLiant DL380 Gen10</system>
+        <subsystem>Сетевая подсистема</subsystem>
+        <component>Intel X710-DA4 10GbE SFP+ Quad Port</component>
+        <category>Сетевое оборудование</category>
+        <mode>Потеря пакетов (packet loss >5%)</mode>
+        <cause>Перегрев чипсета контроллера из-за недостаточной вентиляции</cause>
+        <effect>Деградация сетевого соединения, тайм-ауты, потеря данных</effect>
+        <severity>6</severity>
+        <occurrence>4</occurrence>
+        <detection>4</detection>
+    </failure>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         СИСТЕМА ОХЛАЖДЕНИЯ
+         ════════════════════════════════════════════════════════════════ -->
+
+    <!-- 14. Вентилятор -->
+    <failure>
+        <system>Сервер Dell PowerEdge R740</system>
+        <subsystem>Система охлаждения</subsystem>
+        <component>Вентилятор Delta 120mm 12V PWM (AFB1212SHE)</component>
+        <category>Система охлаждения</category>
+        <mode>Полный отказ вентилятора (0 RPM)</mode>
+        <cause>Износ подшипников после 40000 часов работы</cause>
+        <effect>Перегрев системы, аварийное отключение сервера</effect>
+        <severity>9</severity>
+        <occurrence>3</occurrence>
+        <detection>3</detection>
+    </failure>
+
+    <!-- 15. Термоинтерфейс процессора -->
+    <failure>
+        <system>Сервер HPE ProLiant DL380 Gen10</system>
+        <subsystem>Система охлаждения процессора</subsystem>
+        <component>Термопаста Arctic MX-4 (4g)</component>
+        <category>Система охлаждения</category>
+        <mode>Высыхание термопасты, потеря теплопроводности</mode>
+        <cause>Длительная эксплуатация (>3 года) при высоких температурах</cause>
+        <effect>Повышение температуры CPU на 15-20°C, троттлинг</effect>
+        <severity>6</severity>
+        <occurrence>7</occurrence>
+        <detection>4</detection>
+    </failure>
+
+</fmea>

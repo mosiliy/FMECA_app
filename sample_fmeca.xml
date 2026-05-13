@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Пример FMECA XML-файла для импорта -->
+<!-- Поля system, subsystem, notes — опциональные -->
+<fmeca>
+  <record>
+    <system>Сервер</system>
+    <subsystem>Система хранения</subsystem>
+    <component>HDD (жёсткий диск)</component>
+    <failure_mode>Механический отказ (нечитаемые сектора)</failure_mode>
+    <cause>Механический износ, вибрация, деградация магнитного слоя</cause>
+    <effect>Потеря данных, деградация массива RAID</effect>
+    <severity>8</severity>
+    <occurrence>4</occurrence>
+    <detection>3</detection>
+    <notes>Контролируется через SMART. Требует периодической замены.</notes>
+  </record>
+  <record>
+    <system>Сервер</system>
+    <subsystem>Система хранения</subsystem>
+    <component>SSD (NAND Flash)</component>
+    <failure_mode>Потеря удержания заряда (retention loss)</failure_mode>
+    <cause>Износ ячеек NAND, термические нагрузки, многократная перезапись</cause>
+    <effect>Потеря сохранённых данных при длительном хранении</effect>
+    <severity>7</severity>
+    <occurrence>3</occurrence>
+    <detection>5</detection>
+    <notes>Критично для архивных систем без периодической перезаписи.</notes>
+  </record>
+  <record>
+    <system>Сервер</system>
+    <subsystem>Система хранения</subsystem>
+    <component>SSD (контроллер)</component>
+    <failure_mode>Отказ контроллера накопителя</failure_mode>
+    <cause>Ошибки прошивки, аппаратные сбои, перегрев</cause>
+    <effect>Полный отказ накопителя, недоступность данных</effect>
+    <severity>9</severity>
+    <occurrence>2</occurrence>
+    <detection>4</detection>
+    <notes>Полный отказ без предварительных признаков. Резервирование обязательно.</notes>
+  </record>
+  <record>
+    <system>Сервер</system>
+    <subsystem>Оперативная память</subsystem>
+    <component>DRAM-модуль (ECC)</component>
+    <failure_mode>Однобитовая ошибка памяти (Single-bit error)</failure_mode>
+    <cause>Космическое излучение, электрические помехи</cause>
+    <effect>Сбой приложения, повреждение данных в ОЗУ</effect>
+    <severity>6</severity>
+    <occurrence>3</occurrence>
+    <detection>2</detection>
+    <notes>Корректируется ECC. Критично при многократном повторении в одной ячейке.</notes>
+  </record>
+  <record>
+    <system>Сервер</system>
+    <subsystem>Оперативная память</subsystem>
+    <component>DRAM-модуль (ECC)</component>
+    <failure_mode>Многобитовая ошибка памяти (Multi-bit error)</failure_mode>
+    <cause>Аппаратные дефекты, деградация памяти, радиационное воздействие</cause>
+    <effect>Сбой операционной системы, BSOD/Kernel panic</effect>
+    <severity>8</severity>
+    <occurrence>2</occurrence>
+    <detection>3</detection>
+    <notes>ECC не корректирует многобитовые ошибки. Требует замены модуля.</notes>
+  </record>
+  <record>
+    <system>Сервер</system>
+    <subsystem>Питание</subsystem>
+    <component>Блок питания (PSU)</component>
+    <failure_mode>Скачок напряжения / отказ конденсатора</failure_mode>
+    <cause>Деградация электролитических конденсаторов, скачки в сети</cause>
+    <effect>Нестабильная работа системы, внезапное отключение</effect>
+    <severity>7</severity>
+    <occurrence>3</occurrence>
+    <detection>4</detection>
+    <notes>Проявляется после 3-5 лет эксплуатации. Рекомендуется резервный PSU.</notes>
+  </record>
+  <record>
+    <system>Рабочая станция</system>
+    <subsystem>Процессор</subsystem>
+    <component>CPU (центральный процессор)</component>
+    <failure_mode>Перегрев и тепловой тротлинг</failure_mode>
+    <cause>Засохшая термопаста, засорение системы охлаждения, высокая нагрузка</cause>
+    <effect>Снижение производительности, нестабильность, ошибки вычислений</effect>
+    <severity>5</severity>
+    <occurrence>4</occurrence>
+    <detection>3</detection>
+    <notes>Выявляется мониторингом температуры. Устраняется обслуживанием СО.</notes>
+  </record>
+  <record>
+    <system>Рабочая станция</system>
+    <subsystem>Сетевой интерфейс</subsystem>
+    <component>Сетевая карта (NIC)</component>
+    <failure_mode>Потеря сетевого соединения / деградация скорости</failure_mode>
+    <cause>Физическое повреждение разъёма, отказ драйвера, перегрев чипа</cause>
+    <effect>Недоступность сетевых сервисов, потеря данных при передаче</effect>
+    <severity>6</severity>
+    <occurrence>3</occurrence>
+    <detection>2</detection>
+    <notes>Диагностируется утилитами мониторинга сети.</notes>
+  </record>
+  <record>
+    <system>Рабочая станция</system>
+    <subsystem>Материнская плата</subsystem>
+    <component>Контроллер SATA/PCIe</component>
+    <failure_mode>Потеря связи с накопителем</failure_mode>
+    <cause>Отказ чипсета, механическое повреждение разъёма, перепад напряжения</cause>
+    <effect>Недоступность дисков, невозможность загрузки ОС</effect>
+    <severity>9</severity>
+    <occurrence>2</occurrence>
+    <detection>5</detection>
+    <notes>Часто необратим без замены материнской платы.</notes>
+  </record>
+  <record>
+    <system>Кластер</system>
+    <subsystem>Коммутация</subsystem>
+    <component>Сетевой коммутатор (switch)</component>
+    <failure_mode>Зависание / потеря пакетов</failure_mode>
+    <cause>Переполнение буферов, программная ошибка прошивки</cause>
+    <effect>Деградация производительности всего кластера</effect>
+    <severity>7</severity>
+    <occurrence>3</occurrence>
+    <detection>3</detection>
+    <notes>Устраняется перезагрузкой. Критично для high-availability систем.</notes>
+  </record>
+</fmeca>
