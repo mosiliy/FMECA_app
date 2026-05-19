@@ -1,6 +1,5 @@
 """
-Модуль визуализации данных FMEA.
-Расширенные графики с поддержкой русского языка.
+Модуль визуализации данных FMEA/FMECA.
 """
 
 import matplotlib.pyplot as plt
@@ -34,7 +33,7 @@ class Visualization:
         ax.axvline(x=100, color='orange', linestyle='--', linewidth=2, label='Средний риск')
         ax.axvline(x=200, color='red', linestyle='--', linewidth=2, label='Высокий риск')
         
-        ax.set_xlabel('RPN (Risk Priority Number)', fontsize=12)
+        ax.set_xlabel('RPN (S×O×D)', fontsize=12)
         ax.set_ylabel('Количество отказов', fontsize=12)
         ax.set_title('Распределение приоритета рисков (RPN)', fontsize=14, fontweight='bold')
         ax.legend()
@@ -67,8 +66,7 @@ class Visualization:
         
         ax.set_xlabel('Суммарный RPN', fontsize=12)
         ax.set_ylabel('Компонент', fontsize=12)
-        ax.set_title(f'Топ-{top_n} компонентов по риску (RPN)',
-                    fontsize=14, fontweight='bold')
+        ax.set_title(f'Топ-{top_n} компонентов по суммарному RPN', fontsize=14, fontweight='bold')
         ax.grid(True, axis='x', alpha=0.3)
         
         for i, (idx, value) in enumerate(component_rpn.items()):
@@ -108,7 +106,7 @@ class Visualization:
             textprops={'fontsize': 11}
         )
         
-        ax.set_title('Распределение категорий риска', fontsize=14, fontweight='bold')
+        ax.set_title('Распределение категорий риска по RPN', fontsize=14, fontweight='bold')
         
         plt.tight_layout()
         
@@ -136,10 +134,9 @@ class Visualization:
             linewidth=1
         )
         
-        ax.set_xlabel('Occurrence (Вероятность возникновения)', fontsize=12)
-        ax.set_ylabel('Severity (Тяжесть последствий)', fontsize=12)
-        ax.set_title('Матрица Severity-Occurrence (размер = RPN)',
-                    fontsize=14, fontweight='bold')
+        ax.set_xlabel('O — вероятность (Occurrence), шкала 1–10', fontsize=12)
+        ax.set_ylabel('S — тяжесть (Severity), шкала 1–10', fontsize=12)
+        ax.set_title('Матрица S×O (размер пузырька = RPN)', fontsize=14, fontweight='bold')
         ax.grid(True, alpha=0.3)
         ax.set_xlim(0, 11)
         ax.set_ylim(0, 11)
@@ -158,9 +155,9 @@ class Visualization:
     @staticmethod
     def plot_criticality_matrix(df: pd.DataFrame, save_path: Optional[str] = None):
         """
-        Матрица критичности по MIL-STD-1629A Task 102, п. 4 и рис. 102.2 (качественный подход):
-        ось X — классификация тяжести (Category IV → I, возрастание тяжести вправо);
-        ось Y — уровень вероятности (Level E → A, возрастание вероятности вверх);
+        Матрица критичности (качественный подход):
+        ось X — класс тяжести (IV → I);
+        ось Y — уровень вероятности (E → A);
         в ячейках — число режимов отказа; пунктир — направление возрастания критичности
         (чем дальше от начала координат по диагонали, тем выше приоритет корректирующих действий).
         """
@@ -233,21 +230,11 @@ class Visualization:
             ],
             fontsize=9,
         )
-        ax.set_xlabel(
-            "Severity classification (increasing severity →)\n"
-            "MIL-STD-1629A Section 4.4.3",
-            fontsize=11,
-        )
-        ax.set_ylabel(
-            "Probability of occurrence level (↑ increasing)\n"
-            "MIL-STD-1629A Section 3.1 (qualitative)",
-            fontsize=11,
-        )
+        ax.set_xlabel("Класс тяжести (IV → I, возрастание →)", fontsize=11)
+        ax.set_ylabel("Уровень вероятности (E → A, ↑ возрастание)", fontsize=11)
         ax.set_title(
-            "Criticality matrix (MIL-STD-1629A Task 102, Fig. 102.2 — qualitative)\n"
             "Матрица критичности — число режимов отказа в ячейке",
-            fontsize=12,
-            fontweight="bold",
+            fontsize=12, fontweight="bold",
         )
         
         for i in range(n_rows):
@@ -287,10 +274,9 @@ class Visualization:
         cbar.set_label("Количество режимов отказа в ячейке", fontsize=10)
         
         note = (
-            "Соответствие шкал FMEA (1–10) уровням MIL для отображения: "
+            "Сопоставление шкал FMEA (1–10): "
             "S: 9–10→I, 7–8→II, 5–6→III, 1–4→IV  |  "
-            "O: 9–10→A, 7–8→B, 5–6→C, 3–4→D, 1–2→E. "
-            "При ground rules заказчика замените маппинг в FMEAModel."
+            "O: 9–10→A, 7–8→B, 5–6→C, 3–4→D, 1–2→E."
         )
         fig.text(0.5, 0.02, note, ha="center", fontsize=8, style="italic")
         
@@ -327,7 +313,7 @@ class Visualization:
         
         ax.set_xlabel('Суммарный RPN', fontsize=12)
         ax.set_ylabel('Категория компонента', fontsize=12)
-        ax.set_title('Распределение рисков по категориям', fontsize=14, fontweight='bold')
+        ax.set_title('Суммарный RPN по категориям компонентов', fontsize=14, fontweight='bold')
         ax.grid(True, axis='x', alpha=0.3)
         
         for i, (idx, value) in enumerate(category_rpn.items()):
@@ -381,3 +367,42 @@ class Visualization:
             save_path=save_path,
             filter_rpn=filter_rpn
         )
+    
+    @staticmethod
+    def plot_mil_criticality_ranking(comprehensive_df: pd.DataFrame, top_n: int = 15,
+                                     save_path: Optional[str] = None):
+        """Рейтинг количественной критичности Cm."""
+        col = "Критичность Cm"
+        if col not in comprehensive_df.columns or comprehensive_df.empty:
+            return
+        ranked = (
+            comprehensive_df.dropna(subset=[col])
+            .sort_values(by=[col, "RPN"], ascending=[False, False])
+            .head(top_n)
+        )
+        if ranked.empty:
+            return
+        
+        labels = [
+            f"{row['Компонент'][:18]} / {row['Вид отказа'][:16]}"
+            for _, row in ranked.iterrows()
+        ]
+        
+        fig, ax = plt.subplots(figsize=(12, max(5, top_n * 0.35)))
+        values = ranked[col].astype(float)
+        bars = ax.barh(labels, values, color='teal', edgecolor='black', alpha=0.85)
+        ax.set_xlabel('Критичность Cm = λ×α×β×t', fontsize=11)
+        ax.set_title(
+            f'Топ-{len(ranked)} режимов по количественной критичности',
+            fontsize=13, fontweight='bold',
+        )
+        ax.grid(True, axis='x', alpha=0.3)
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2,
+                    f' {val:.4g}', va='center', fontsize=9)
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+        else:
+            plt.show()

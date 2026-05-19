@@ -1,10 +1,13 @@
 """
 Бизнес-логика приложения.
-Расчёты в соответствии со стандартами MIL-STD-1629A, IEC 60812.
+Расчёты в соответствии со стандартами MIL-STD-1629A, ГОСТ 27.310-95,
+ГОСТ Р 58629-2020, ГОСТ Р 27.303-2021.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
+
+from standards import yn_flag, safe_float
 
 
 class FMEAModel:
@@ -397,40 +400,214 @@ class FMEAModel:
             'low_count': len(df[df['RPN'] < 40])
         }
     
+    COMPREHENSIVE_REPORT_COLUMNS = [
+        "№", "Система", "Подсистема", "Компонент", "Категория",
+        "Функция", "Вид отказа", "Причина",
+        "Локальный эффект", "Эффект верхнего уровня", "Конечный эффект", "Последствие (общ.)",
+        "S", "O", "D", "RPN", "Категория риска",
+        "Тяжесть (описание)", "Вероятность (описание)", "Обнаруживаемость (описание)",
+        "Класс тяжести", "Уровень вероятности",
+        "λ (1/ч)", "α", "β", "t (ч)", "Критичность Cm",
+        "Текущие меры контроля", "Рекомендуемые меры", "Ответственный", "Срок", "Статус мер",
+        "Фаза миссии", "Режим работы",
+        "ОПФ", "Скрытый отказ", "ОППО",
+        "S ост.", "O ост.", "D ост.",
+        "RPN до мер", "RPN после мер", "Снижение риска",
+        "Полнота анализа, %",
+    ]
+    
+    @staticmethod
+    def _row_to_failure_dict(row: tuple) -> Dict[str, Any]:
+        """Преобразование строки отчёта БД в словарь для расчётов."""
+        if len(row) >= 35:
+            return {
+                "id": row[0],
+                "system": row[1],
+                "subsystem": row[2],
+                "component": row[3],
+                "category": row[4],
+                "function_text": row[5],
+                "failure_mode": row[6],
+                "failure_cause": row[7],
+                "local_effect": row[8],
+                "next_higher_effect": row[9],
+                "end_effect": row[10],
+                "failure_effect": row[11],
+                "severity": row[12],
+                "occurrence": row[13],
+                "detection": row[14],
+                "rpn": row[15],
+                "mil_criticality": row[16],
+                "failure_rate_lambda": row[17],
+                "mode_ratio_alpha": row[18],
+                "conditional_prob_beta": row[19],
+                "mission_time_t": row[20],
+                "current_controls": row[21],
+                "recommended_actions": row[22],
+                "action_owner": row[23],
+                "due_date": row[24],
+                "action_status": row[25],
+                "mission_phase": row[26],
+                "operating_mode": row[27],
+                "is_single_point": row[28],
+                "is_latent": row[29],
+                "is_common_cause": row[30],
+                "residual_severity": row[31],
+                "residual_occurrence": row[32],
+                "residual_detection": row[33],
+                "residual_rpn": row[34],
+            }
+        # Устаревший короткий формат (20 полей)
+        return {
+            "id": row[0],
+            "system": row[1],
+            "subsystem": row[2],
+            "component": row[3],
+            "category": row[4],
+            "function_text": row[5],
+            "failure_mode": row[6],
+            "failure_cause": row[7],
+            "local_effect": row[8],
+            "next_higher_effect": row[9],
+            "end_effect": row[10],
+            "severity": row[11],
+            "occurrence": row[12],
+            "detection": row[13],
+            "rpn": row[14],
+            "mil_criticality": row[15],
+            "recommended_actions": row[16],
+            "action_owner": row[17],
+            "due_date": row[18],
+            "residual_rpn": row[19],
+        }
+    
+    @staticmethod
+    def build_comprehensive_fmeca_dataframe(data: List[tuple]) -> pd.DataFrame:
+        """
+        Полная таблица FMECA для отчётов по ГОСТ / MIL-STD-1629A
+        (все поля БД + производные показатели).
+        """
+        rows = []
+        for row in data:
+            f = FMEAModel._row_to_failure_dict(row)
+            s = f.get("severity")
+            o = f.get("occurrence")
+            d = f.get("detection")
+            rpn = f.get("rpn")
+            if rpn is None and all(v is not None for v in (s, o, d)):
+                rpn = FMEAModel.calculate_rpn(int(s), int(o), int(d))
+            
+            risk = FMEAModel.get_risk_category(int(rpn)) if rpn is not None else ""
+            mil_cat = FMEAModel.map_severity_to_mil_std_1629a_category(s) if s is not None else ""
+            mil_prob = FMEAModel.map_occurrence_to_mil_std_1629a_level(o) if o is not None else ""
+            
+            mil_cm = f.get("mil_criticality")
+            if mil_cm is None:
+                mil_cm = FMEAModel.calc_mil_criticality(
+                    f.get("failure_rate_lambda"),
+                    f.get("mode_ratio_alpha"),
+                    f.get("conditional_prob_beta"),
+                    f.get("mission_time_t"),
+                )
+            
+            residual = FMEAModel.calculate_residual_risk(f)
+            completeness = FMEAModel.calculate_analysis_completeness(f)
+            
+            sev_text = FMEAModel.SEVERITY_SCALE.get(int(s), "") if s is not None else ""
+            occ_text = FMEAModel.OCCURRENCE_SCALE.get(int(o), "") if o is not None else ""
+            det_text = FMEAModel.DETECTION_SCALE.get(int(d), "") if d is not None else ""
+            
+            rows.append({
+                "№": f.get("id"),
+                "Система": f.get("system") or "",
+                "Подсистема": f.get("subsystem") or "",
+                "Компонент": f.get("component") or "",
+                "Категория": f.get("category") or "",
+                "Функция": f.get("function_text") or "",
+                "Вид отказа": f.get("failure_mode") or "",
+                "Причина": f.get("failure_cause") or "",
+                "Локальный эффект": f.get("local_effect") or "",
+                "Эффект верхнего уровня": f.get("next_higher_effect") or "",
+                "Конечный эффект": f.get("end_effect") or "",
+                "Последствие (общ.)": f.get("failure_effect") or "",
+                "S": s,
+                "O": o,
+                "D": d,
+                "RPN": rpn,
+                "Категория риска": risk,
+                "Тяжесть (описание)": sev_text,
+                "Вероятность (описание)": occ_text,
+                "Обнаруживаемость (описание)": det_text,
+                "Класс тяжести": mil_cat,
+                "Уровень вероятности": mil_prob,
+                "λ (1/ч)": safe_float(f.get("failure_rate_lambda")),
+                "α": safe_float(f.get("mode_ratio_alpha")),
+                "β": safe_float(f.get("conditional_prob_beta")),
+                "t (ч)": safe_float(f.get("mission_time_t")),
+                "Критичность Cm": mil_cm,
+                "Текущие меры контроля": f.get("current_controls") or "",
+                "Рекомендуемые меры": f.get("recommended_actions") or "",
+                "Ответственный": f.get("action_owner") or "",
+                "Срок": f.get("due_date") or "",
+                "Статус мер": f.get("action_status") or "",
+                "Фаза миссии": f.get("mission_phase") or "",
+                "Режим работы": f.get("operating_mode") or "",
+                "ОПФ": yn_flag(f.get("is_single_point")),
+                "Скрытый отказ": yn_flag(f.get("is_latent")),
+                "ОППО": yn_flag(f.get("is_common_cause")),
+                "S ост.": f.get("residual_severity"),
+                "O ост.": f.get("residual_occurrence"),
+                "D ост.": f.get("residual_detection"),
+                "RPN до мер": residual.get("initial_rpn"),
+                "RPN после мер": residual.get("residual_rpn"),
+                "Снижение риска": residual.get("risk_reduction"),
+                "Полнота анализа, %": completeness,
+            })
+        
+        return pd.DataFrame(rows, columns=FMEAModel.COMPREHENSIVE_REPORT_COLUMNS)
+    
     @staticmethod
     def build_standardized_fmeca_dataframe(data: List[tuple]) -> pd.DataFrame:
         """
-        Формирование стандартизированной таблицы FMECA для экспорта/отчётов.
-        
-        Ожидаемый формат data (из Database.get_failures_for_standard_report):
-            (id, system, subsystem, component, category, function_text,
-             failure_mode, failure_cause, local_effect, next_higher_effect, end_effect,
-             severity, occurrence, detection, rpn, mil_criticality,
-             recommended_actions, action_owner, due_date, residual_rpn)
+        Стандартизированная таблица FMECA (англ. заголовки) для совместимости экспорта.
+        Строится из полной таблицы ГОСТ/MIL.
         """
-        columns = [
-            "ID", "System", "Subsystem", "Component", "Category",
-            "Function", "Failure Mode", "Cause",
-            "Local Effect", "Next Higher Effect", "End Effect",
-            "Severity", "Occurrence", "Detection", "RPN", "MIL Criticality",
-            "Recommended Actions", "Action Owner", "Due Date", "Residual RPN"
-        ]
-        df = pd.DataFrame(data, columns=columns)
+        full_df = FMEAModel.build_comprehensive_fmeca_dataframe(data)
+        if full_df.empty:
+            return pd.DataFrame(columns=[
+                "ID", "System", "Subsystem", "Component", "Category",
+                "Function", "Failure Mode", "Cause",
+                "Local Effect", "Next Higher Effect", "End Effect",
+                "Severity", "Occurrence", "Detection", "RPN", "MIL Criticality",
+                "Recommended Actions", "Action Owner", "Due Date", "Residual RPN",
+                "Before Actions (RPN)", "After Actions (Residual RPN)", "Risk Reduction",
+            ])
         
-        # Блок "Before actions / After actions"
-        df["Before Actions (RPN)"] = df["RPN"]
-        df["After Actions (Residual RPN)"] = df["Residual RPN"]
-        df["Risk Reduction"] = df["Before Actions (RPN)"] - df["After Actions (Residual RPN)"]
-        
-        # Безопасная обработка NaN для последующего экспорта
-        text_columns = [
-            "Function", "Failure Mode", "Cause", "Local Effect", "Next Higher Effect", "End Effect",
-            "Recommended Actions", "Action Owner", "Due Date", "Category", "System", "Subsystem", "Component"
-        ]
-        for col in text_columns:
-            if col in df.columns:
-                df[col] = df[col].fillna("")
-        
+        df = pd.DataFrame({
+            "ID": full_df["№"],
+            "System": full_df["Система"],
+            "Subsystem": full_df["Подсистема"],
+            "Component": full_df["Компонент"],
+            "Category": full_df["Категория"],
+            "Function": full_df["Функция"],
+            "Failure Mode": full_df["Вид отказа"],
+            "Cause": full_df["Причина"],
+            "Local Effect": full_df["Локальный эффект"],
+            "Next Higher Effect": full_df["Эффект верхнего уровня"],
+            "End Effect": full_df["Конечный эффект"],
+            "Severity": full_df["S"],
+            "Occurrence": full_df["O"],
+            "Detection": full_df["D"],
+            "RPN": full_df["RPN"],
+            "MIL Criticality": full_df["Критичность Cm"],
+            "Recommended Actions": full_df["Рекомендуемые меры"],
+            "Action Owner": full_df["Ответственный"],
+            "Due Date": full_df["Срок"],
+            "Residual RPN": full_df["RPN после мер"],
+        })
+        df["Before Actions (RPN)"] = full_df["RPN до мер"]
+        df["After Actions (Residual RPN)"] = full_df["RPN после мер"]
+        df["Risk Reduction"] = full_df["Снижение риска"]
         return df
     
     @staticmethod
@@ -447,6 +624,67 @@ class FMEAModel:
                 na_position="last"
             )
         return df.sort_values(by=["RPN"], ascending=[False])
+    
+    @staticmethod
+    def sort_comprehensive_fmeca(df: pd.DataFrame, sort_by: str = "rpn") -> pd.DataFrame:
+        """Сортировка полной таблицы FMECA."""
+        if df.empty:
+            return df
+        if sort_by == "mil_criticality" and "Критичность Cm" in df.columns:
+            return df.sort_values(
+                by=["Критичность Cm", "RPN"],
+                ascending=[False, False],
+                na_position="last",
+            )
+        return df.sort_values(by=["RPN"], ascending=[False], na_position="last")
+    
+    @staticmethod
+    def build_mil_quantitative_sheet(df: pd.DataFrame) -> pd.DataFrame:
+        """Лист количественной критичности MIL-STD-1629A Task 101."""
+        cols = [
+            "№", "Компонент", "Вид отказа", "λ (1/ч)", "α", "β", "t (ч)",
+            "Критичность Cm", "RPN", "Класс тяжести", "Уровень вероятности",
+        ]
+        if df.empty:
+            return pd.DataFrame(columns=cols)
+        out = df[cols].copy()
+        return out.sort_values(by=["Критичность Cm", "RPN"], ascending=[False, False], na_position="last")
+    
+    @staticmethod
+    def build_analysis_summary(df: pd.DataFrame) -> pd.DataFrame:
+        """Сводка полноты и рисков анализа."""
+        if df.empty:
+            return pd.DataFrame(columns=["Показатель", "Значение"])
+        total = len(df)
+        complete = len(df[df["Полнота анализа, %"] >= 100.0]) if "Полнота анализа, %" in df.columns else 0
+        with_cm = len(df[df["Критичность Cm"].notna()]) if "Критичность Cm" in df.columns else 0
+        with_actions = len(df[df["Рекомендуемые меры"].astype(str).str.strip() != ""])
+        return pd.DataFrame({
+            "Показатель": [
+                "Всего режимов отказа",
+                "Записей с полнотой 100%",
+                "Доля полных записей, %",
+                "Записей с Cm",
+                "Записей с рекомендуемыми мерами",
+                "Средний RPN",
+                "Максимальный RPN",
+                "Критических (RPN ≥ 200)",
+                "Высоких (100 ≤ RPN < 200)",
+            ],
+            "Значение": [
+                total,
+                complete,
+                round(complete / total * 100, 1) if total else 0,
+                with_cm,
+                with_actions,
+                round(df["RPN"].mean(), 2) if "RPN" in df.columns else "",
+                df["RPN"].max() if "RPN" in df.columns else "",
+                len(df[df["RPN"] >= 200]) if "RPN" in df.columns else 0,
+                len(df[(df["RPN"] >= 100) & (df["RPN"] < 200)]) if "RPN" in df.columns else 0,
+            ],
+        })
+    
+    build_gost_compliance_summary = build_analysis_summary
     
     @staticmethod
     def build_quality_dashboard(
@@ -549,7 +787,7 @@ class FMEAModel:
             )
         
         if mil_value is None:
-            mil_text = "MIL criticality: не рассчитана (нет достаточных данных)."
+            mil_text = "Критичность Cm: не рассчитана (нет достаточных данных)."
         else:
             if mil_value < 1e-4:
                 mil_level = "очень низкая"
@@ -559,7 +797,7 @@ class FMEAModel:
                 mil_level = "средняя"
             else:
                 mil_level = "высокая"
-            mil_text = f"MIL criticality: {mil_value:.6g} ({mil_level})."
+            mil_text = f"Критичность Cm: {mil_value:.6g} ({mil_level})."
         
         # Влияние на систему
         local_effect = (failure.get("local_effect") or "").strip()

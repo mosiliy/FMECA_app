@@ -73,8 +73,12 @@ class FMEAApp:
         self._build_table()
         self._build_status_bar()
         
-        # Загрузка данных
+        from demo_data import seed_demo_database, get_failure_count
+        if get_failure_count(self.db) == 0:
+            seed_demo_database(self.db, replace=False)
+        
         self.refresh_table()
+        self._update_header_info()
     
     # ═══════════════════════════════════════════════════════════════════
     #  UI CONSTRUCTION
@@ -92,9 +96,9 @@ class FMEAApp:
             bg=CLR_HEADER, fg="white", font=("Arial", 13, "bold")
         ).pack(side=tk.LEFT, padx=16, pady=10)
         
+        self.header_info_var = tk.StringVar(value="")
         tk.Label(
-            hdr, 
-            text="MIL-STD-1629A  |  IEC 60812  |  ГОСТ 27.310-95  |  ГОСТ Р ИСО/МЭК 31010",
+            hdr, textvariable=self.header_info_var,
             bg=CLR_HEADER, fg="#90CAF9", font=("Arial", 9)
         ).pack(side=tk.RIGHT, padx=16)
     
@@ -457,6 +461,8 @@ class FMEAApp:
         if self.show_only_structured_var.get():
             status_text += "  |  показаны только актуальные по структуре"
         self.status_var.set(status_text)
+        if hasattr(self, "header_info_var"):
+            self._update_header_info()
     
     def _selected_id(self) -> Optional[int]:
         """Получение ID выбранной записи."""
@@ -642,6 +648,11 @@ class FMEAApp:
         std_df = self.model.build_standardized_fmeca_dataframe(raw_data)
         return self.model.sort_standardized_fmeca(std_df, sort_by=sort_by)
     
+    def _build_comprehensive_export_df(self, sort_by: str = "rpn") -> pd.DataFrame:
+        """Полная таблица FMECA для экспорта и полного отчёта."""
+        from reports import ReportGenerator
+        return ReportGenerator.build_comprehensive_report_dataframe(self.db, sort_by=sort_by)
+    
     def export_excel(self):
         """Экспорт в Excel."""
         data = self.db.get_all_failures()
@@ -661,12 +672,17 @@ class FMEAApp:
         try:
             df = self.model.analyze_failures(data)
             standardized_df = self._build_standardized_export_df(sort_by="rpn")
-            IOUtils.export_to_excel(df, filepath, standardized_df=standardized_df)
+            comprehensive_df = self._build_comprehensive_export_df(sort_by="rpn")
+            IOUtils.export_to_excel(
+                df, filepath,
+                standardized_df=standardized_df,
+                comprehensive_df=comprehensive_df,
+            )
             self.update_status(f"Экспорт в Excel: {os.path.basename(filepath)}")
             messagebox.showinfo(
                 "Экспорт",
                 f"Файл сохранён:\n{filepath}\n\n"
-                f"Добавлены листы стандартизированного FMECA отчёта."
+                f"Листы: полный FMECA, количественная критичность, сводка, до/после мер."
             )
         except Exception as e:
             messagebox.showerror("Ошибка экспорта", str(e))
@@ -690,12 +706,17 @@ class FMEAApp:
         try:
             df = self.model.analyze_failures(data)
             standardized_df = self._build_standardized_export_df(sort_by="rpn")
-            IOUtils.export_to_pdf(df, filepath, standardized_df=standardized_df)
+            comprehensive_df = self._build_comprehensive_export_df(sort_by="rpn")
+            IOUtils.export_to_pdf(
+                df, filepath,
+                standardized_df=standardized_df,
+                comprehensive_df=comprehensive_df,
+            )
             self.update_status(f"Экспорт в PDF: {os.path.basename(filepath)}")
             messagebox.showinfo(
                 "Экспорт",
                 f"Файл сохранён:\n{filepath}\n\n"
-                f"Добавлен блок стандартизированного FMECA отчёта."
+                f"Включены таблицы FMECA (топ-25; полный набор — в Excel)."
             )
         except Exception as e:
             messagebox.showerror("Ошибка экспорта", str(e))
@@ -719,11 +740,18 @@ class FMEAApp:
         try:
             df = self.model.analyze_failures(data)
             standardized_df = self._build_standardized_export_df(sort_by="rpn")
+            comprehensive_df = self._build_comprehensive_export_df(sort_by="rpn")
             ReportGenerator.generate_full_report(
-                df, filepath, report_format='pdf', standardized_df=standardized_df
+                df, filepath, report_format='pdf',
+                standardized_df=standardized_df,
+                comprehensive_df=comprehensive_df,
             )
             self.update_status(f"Полный отчёт: {os.path.basename(filepath)}")
-            messagebox.showinfo("Успех", f"Полный отчёт сохранён:\n{filepath}")
+            messagebox.showinfo(
+                "Успех",
+                f"Полный отчёт сохранён:\n{filepath}\n\n"
+                f"Все таблицы (без усечения) + 7 графиков."
+            )
         except Exception as e:
             messagebox.showerror("Ошибка", str(e))
     
@@ -741,8 +769,9 @@ class FMEAApp:
         menu.add_command(label="🎯 Категории риска", command=self.plot_risk_categories)
         menu.add_command(label="🔥 Матрица S-O", command=self.plot_so_matrix)
         menu.add_command(label="🔥 Матрица критичности", command=self.plot_criticality_matrix)
+        menu.add_command(label="📈 Рейтинг по Cm", command=self.plot_mil_ranking)
         menu.add_separator()
-        menu.add_command(label="🕸 Граф зависимостей", command=self.show_dependency_graph)  # НОВОЕ
+        menu.add_command(label="🕸 Граф зависимостей", command=self.show_dependency_graph)
         
         try:
             menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
@@ -797,6 +826,59 @@ class FMEAApp:
         df = self.model.analyze_failures(data)
         Visualization.plot_criticality_matrix(df)
     
+    def plot_mil_ranking(self):
+        comp_df = self._build_comprehensive_export_df(sort_by="mil_criticality")
+        if comp_df.empty or comp_df["Критичность Cm"].isna().all():
+            messagebox.showwarning(
+                "Нет данных",
+                "Заполните λ, α, β и t миссии для расчёта критичности Cm.",
+            )
+            return
+        Visualization.plot_mil_criticality_ranking(comp_df)
+    
+    def _update_header_info(self):
+        from demo_data import get_failure_count
+        n = get_failure_count(self.db)
+        self.header_info_var.set(f"Записей в базе: {n}")
+    
+    def load_demo_data(self):
+        if not messagebox.askyesno(
+            "Демо-данные",
+            "Загрузить 50 демонстрационных записей?\n\n"
+            "Текущие компоненты и отказы будут удалены. Справочники сохранятся.",
+            parent=self.root,
+        ):
+            return
+        try:
+            from demo_data import seed_demo_database
+            count = seed_demo_database(self.db, replace=True)
+            self.refresh_table()
+            self._update_header_info()
+            messagebox.showinfo("Готово", f"Загружено записей: {count}")
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e))
+    
+    def _dict_delete_from_tree(self, tree, delete_fn, refresh_fn, id_column_index=0, parent_win=None):
+        """Удаление выбранной строки справочника."""
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Удаление", "Выберите запись в списке.", parent=parent_win)
+            return
+        values = tree.item(sel[0], "values")
+        record_id = int(values[id_column_index])
+        name = values[1] if len(values) > 1 else str(record_id)
+        if not messagebox.askyesno(
+            "Подтверждение",
+            f"Удалить «{name}»?",
+            parent=parent_win,
+        ):
+            return
+        ok, err = delete_fn(record_id)
+        if ok:
+            refresh_fn()
+        else:
+            messagebox.showerror("Не удалось удалить", err, parent=parent_win)
+    
     # ═══════════════════════════════════════════════════════════════════
     #  СПРАВОЧНИКИ
     # ═══════════════════════════════════════════════════════════════════
@@ -808,6 +890,10 @@ class FMEAApp:
         menu.add_command(label="⚠️ Типы отказов", command=self.manage_failure_types)
         menu.add_command(label="🔍 Причины отказов", command=self.manage_causes)
         menu.add_command(label="⚡ Последствия отказов", command=self.manage_effects)
+        menu.add_separator()
+        menu.add_command(label="📋 Расширенные поля FMECA", command=self.manage_fmeca_lookups)
+        menu.add_separator()
+        menu.add_command(label="📥 Загрузить демо (50 записей)", command=self.load_demo_data)
         menu.add_separator()
         menu.add_command(label="📊 Статистика", command=self.show_statistics)
         menu.add_command(label="🏆 Топ-10 рисков", command=self.show_top_risks)
@@ -821,16 +907,22 @@ class FMEAApp:
         """Окно управления категориями."""
         win = tk.Toplevel(self.root)
         win.title("Категории компонентов")
-        win.geometry("500x400")
+        win.geometry("520x420")
         win.configure(bg=CLR_BG)
         win.grab_set()
         
-        listbox = tk.Listbox(win, height=15, font=("Arial", 10))
-        listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        tree = ttk.Treeview(win, columns=("ID", "Название"), show="headings", style="FMEA.Treeview")
+        tree.heading("ID", text="ID")
+        tree.heading("Название", text="Название")
+        tree.column("ID", width=60, anchor=tk.CENTER)
+        tree.column("Название", width=420, anchor=tk.W)
+        tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        categories = self.db.get_all_categories()
-        for _, name in categories:
-            listbox.insert(tk.END, name)
+        def refresh():
+            for item in tree.get_children():
+                tree.delete(item)
+            for cid, name in self.db.get_all_categories():
+                tree.insert("", tk.END, values=(cid, name))
         
         btn_frame = tk.Frame(win, bg=CLR_BG)
         btn_frame.pack(pady=5)
@@ -838,15 +930,24 @@ class FMEAApp:
         def add_cat():
             name = simpledialog.askstring("Добавить", "Название категории:", parent=win)
             if name:
-                self.db.add_category(name)
-                listbox.insert(tk.END, name)
+                self.db.add_category(name.strip())
+                refresh()
         
-        tk.Button(btn_frame, text="➕ Добавить", command=add_cat, 
+        tk.Button(btn_frame, text="➕ Добавить", command=add_cat,
                  bg=CLR_BTN_GRN, fg="white", font=("Arial", 9, "bold"),
                  relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            btn_frame, text="🗑 Удалить",
+            command=lambda: self._dict_delete_from_tree(
+                tree, self.db.delete_category, refresh, parent_win=win
+            ),
+            bg=CLR_BTN_RED, fg="white", font=("Arial", 9, "bold"),
+            relief=tk.FLAT, padx=10, pady=4,
+        ).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Закрыть", command=win.destroy,
                  bg=CLR_BTN_GREY, fg="white", font=("Arial", 9),
                  relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        refresh()
     
     def manage_failure_types(self):
         """Окно управления типами отказов."""
@@ -889,6 +990,14 @@ class FMEAApp:
         tk.Button(btn_frame, text="➕ Добавить", command=add_item,
                   bg=CLR_BTN_GRN, fg="white", font=("Arial", 9, "bold"),
                   relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            btn_frame, text="🗑 Удалить",
+            command=lambda: self._dict_delete_from_tree(
+                tree, self.db.delete_failure_type, refresh, parent_win=win
+            ),
+            bg=CLR_BTN_RED, fg="white", font=("Arial", 9, "bold"),
+            relief=tk.FLAT, padx=10, pady=4,
+        ).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Обновить", command=refresh,
                   bg=CLR_BTN_BLUE, fg="white", font=("Arial", 9),
                   relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
@@ -937,6 +1046,14 @@ class FMEAApp:
         tk.Button(btn_frame, text="➕ Добавить", command=add_item,
                   bg=CLR_BTN_GRN, fg="white", font=("Arial", 9, "bold"),
                   relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            btn_frame, text="🗑 Удалить",
+            command=lambda: self._dict_delete_from_tree(
+                tree, self.db.delete_cause, refresh, parent_win=win
+            ),
+            bg=CLR_BTN_RED, fg="white", font=("Arial", 9, "bold"),
+            relief=tk.FLAT, padx=10, pady=4,
+        ).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Обновить", command=refresh,
                   bg=CLR_BTN_BLUE, fg="white", font=("Arial", 9),
                   relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
@@ -985,6 +1102,107 @@ class FMEAApp:
         tk.Button(btn_frame, text="➕ Добавить", command=add_item,
                   bg=CLR_BTN_GRN, fg="white", font=("Arial", 9, "bold"),
                   relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            btn_frame, text="🗑 Удалить",
+            command=lambda: self._dict_delete_from_tree(
+                tree, self.db.delete_effect, refresh, parent_win=win
+            ),
+            bg=CLR_BTN_RED, fg="white", font=("Arial", 9, "bold"),
+            relief=tk.FLAT, padx=10, pady=4,
+        ).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Обновить", command=refresh,
+                  bg=CLR_BTN_BLUE, fg="white", font=("Arial", 9),
+                  relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Закрыть", command=win.destroy,
+                  bg=CLR_BTN_GREY, fg="white", font=("Arial", 9),
+                  relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        
+        refresh()
+    
+    def manage_fmeca_lookups(self):
+        """Окно просмотра и управления справочниками расширенных полей FMECA."""
+        win = tk.Toplevel(self.root)
+        win.title("Справочники расширенных полей FMECA")
+        win.geometry("680x460")
+        win.configure(bg=CLR_BG)
+        win.grab_set()
+        
+        selector_frame = tk.Frame(win, bg=CLR_BG)
+        selector_frame.pack(fill=tk.X, padx=10, pady=(10, 4))
+        tk.Label(
+            selector_frame, text="Справочник:", bg=CLR_BG, font=("Arial", 9, "bold")
+        ).pack(side=tk.LEFT)
+        
+        domain_labels = list(Database.FMECA_LOOKUP_LABELS.items())
+        domain_keys = [key for key, _ in domain_labels]
+        domain_names = [label for _, label in domain_labels]
+        
+        selected_domain = tk.StringVar(value=domain_names[0] if domain_names else "")
+        domain_combo = ttk.Combobox(
+            selector_frame, textvariable=selected_domain,
+            values=domain_names, state="readonly", width=40,
+        )
+        domain_combo.pack(side=tk.LEFT, padx=8)
+        
+        columns = ("ID", "Значение")
+        tree = ttk.Treeview(win, columns=columns, show="headings", style="FMEA.Treeview")
+        tree.heading("ID", text="ID")
+        tree.heading("Значение", text="Значение")
+        tree.column("ID", width=70, anchor=tk.CENTER)
+        tree.column("Значение", width=560, anchor=tk.W)
+        tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        def current_domain() -> str:
+            label = selected_domain.get()
+            for key, name in domain_labels:
+                if name == label:
+                    return key
+            return domain_keys[0]
+        
+        def refresh():
+            for item in tree.get_children():
+                tree.delete(item)
+            for row_id, name in self.db.get_all_fmeca_lookups(current_domain()):
+                tree.insert("", tk.END, values=(row_id, name))
+        
+        def on_domain_change(event=None):
+            refresh()
+        
+        domain_combo.bind("<<ComboboxSelected>>", on_domain_change)
+        
+        btn_frame = tk.Frame(win, bg=CLR_BG)
+        btn_frame.pack(pady=6)
+        
+        def add_item():
+            domain = current_domain()
+            label = Database.FMECA_LOOKUP_LABELS.get(domain, domain)
+            name = simpledialog.askstring(
+                "Добавить значение",
+                f"Новое значение для «{label}»:",
+                parent=win,
+            )
+            if not name:
+                return
+            name = name.strip()
+            if not name:
+                return
+            try:
+                self.db.ensure_fmeca_lookup_value(domain, name)
+                refresh()
+            except Exception as e:
+                messagebox.showerror("Ошибка", str(e), parent=win)
+        
+        tk.Button(btn_frame, text="➕ Добавить", command=add_item,
+                  bg=CLR_BTN_GRN, fg="white", font=("Arial", 9, "bold"),
+                  relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            btn_frame, text="🗑 Удалить",
+            command=lambda: self._dict_delete_from_tree(
+                tree, self.db.delete_fmeca_lookup, refresh, parent_win=win
+            ),
+            bg=CLR_BTN_RED, fg="white", font=("Arial", 9, "bold"),
+            relief=tk.FLAT, padx=10, pady=4,
+        ).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Обновить", command=refresh,
                   bg=CLR_BTN_BLUE, fg="white", font=("Arial", 9),
                   relief=tk.FLAT, padx=10, pady=4).pack(side=tk.LEFT, padx=5)
@@ -1228,7 +1446,7 @@ class RecordDialog:
         cat_frame = tk.Frame(left_frame, bg=CLR_BG)
         cat_frame.pack(fill=tk.X, padx=10)
         
-        self.combo_category = ttk.Combobox(cat_frame, width=28, state='readonly')
+        self.combo_category = ttk.Combobox(cat_frame, width=28, state='normal')
         self.combo_category.pack(side=tk.LEFT)
         self.combo_category.bind('<<ComboboxSelected>>', self.on_category_selected)
         
@@ -1244,7 +1462,7 @@ class RecordDialog:
         ft_frame = tk.Frame(right_frame, bg=CLR_BG)
         ft_frame.pack(fill=tk.X, padx=10)
         
-        self.combo_failure_type = ttk.Combobox(ft_frame, width=28, state='readonly')
+        self.combo_failure_type = ttk.Combobox(ft_frame, width=28, state='normal')
         self.combo_failure_type.pack(side=tk.LEFT)
         self.combo_failure_type.bind('<<ComboboxSelected>>', self.on_failure_type_selected)
         
@@ -1265,7 +1483,7 @@ class RecordDialog:
         cause_frame = tk.Frame(right_frame, bg=CLR_BG)
         cause_frame.pack(fill=tk.X, padx=10)
         
-        self.combo_cause = ttk.Combobox(cause_frame, width=28, state='readonly')
+        self.combo_cause = ttk.Combobox(cause_frame, width=28, state='normal')
         self.combo_cause.pack(side=tk.LEFT)
         
         tk.Button(cause_frame, text="+", width=2, command=self.add_new_cause,
@@ -1278,7 +1496,7 @@ class RecordDialog:
         effect_frame = tk.Frame(right_frame, bg=CLR_BG)
         effect_frame.pack(fill=tk.X, padx=10)
         
-        self.combo_effect = ttk.Combobox(effect_frame, width=28, state='readonly')
+        self.combo_effect = ttk.Combobox(effect_frame, width=28, state='normal')
         self.combo_effect.pack(side=tk.LEFT)
         
         tk.Button(effect_frame, text="+", width=2, command=self.add_new_effect,
@@ -1361,52 +1579,6 @@ class RecordDialog:
             "mission_time_t": tk.StringVar(),
         }
         
-        # Категоризируемые справочники значений для однозначного ввода
-        function_options = [
-            "Обработка вычислительных задач",
-            "Хранение оперативных данных",
-            "Долговременное хранение данных",
-            "Стабилизация электропитания",
-            "Передача сетевого трафика",
-            "Охлаждение и теплоотвод",
-        ]
-        effect_options = [
-            "Снижение производительности",
-            "Рост задержек",
-            "Сбой вычислительных модулей",
-            "Потеря доступности подсистемы",
-            "Риск потери данных",
-            "Срыв SLA/критичного сервиса",
-        ]
-        mission_phase_options = [
-            "Проектирование",
-            "Интеграция",
-            "Испытания",
-            "Эксплуатация",
-            "Техническое обслуживание",
-        ]
-        operating_mode_options = [
-            "Номинальный",
-            "Пиковая нагрузка",
-            "Резервный",
-            "Деградированный",
-            "Пуск/останов",
-        ]
-        action_options = [
-            "Замена компонента",
-            "Плановое техническое обслуживание",
-            "Обновление прошивки/ПО",
-            "Усиление мониторинга",
-            "Изменение режима эксплуатации",
-        ]
-        owner_options = [
-            "Инженер по надежности",
-            "Системный инженер",
-            "Инженер эксплуатации",
-            "DBA",
-            "Сетевой инженер",
-        ]
-        
         self.residual_vars = {
             "residual_severity": tk.IntVar(value=5),
             "residual_occurrence": tk.IntVar(value=5),
@@ -1414,51 +1586,42 @@ class RecordDialog:
             "residual_rpn": tk.StringVar(value=""),
         }
         
-        # Текстовые поля
         grid_pad = {"padx": 6, "pady": 3}
         tk.Label(advanced_frame, text="Функция компонента *", bg=CLR_BG, font=("Arial", 8)).grid(row=1, column=0, sticky=tk.W, **grid_pad)
-        self.combo_function = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["function_text"], values=function_options, width=26, state="readonly"
+        self.combo_function = self._place_fmeca_lookup_combo(
+            advanced_frame, 1, 1, self.vars["function_text"], "function", width=24
         )
-        self.combo_function.grid(row=1, column=1, sticky=tk.W, **grid_pad)
         tk.Label(advanced_frame, text="Фаза миссии", bg=CLR_BG, font=("Arial", 8)).grid(row=1, column=2, sticky=tk.W, **grid_pad)
-        self.combo_mission_phase = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["mission_phase"], values=mission_phase_options, width=18, state="readonly"
+        self.combo_mission_phase = self._place_fmeca_lookup_combo(
+            advanced_frame, 1, 3, self.vars["mission_phase"], "mission_phase", width=16
         )
-        self.combo_mission_phase.grid(row=1, column=3, sticky=tk.W, **grid_pad)
         
         tk.Label(advanced_frame, text="Локальный эффект *", bg=CLR_BG, font=("Arial", 8)).grid(row=2, column=0, sticky=tk.W, **grid_pad)
-        self.combo_local_effect = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["local_effect"], values=effect_options, width=26, state="readonly"
+        self.combo_local_effect = self._place_fmeca_lookup_combo(
+            advanced_frame, 2, 1, self.vars["local_effect"], "effect", width=24
         )
-        self.combo_local_effect.grid(row=2, column=1, sticky=tk.W, **grid_pad)
         tk.Label(advanced_frame, text="Режим работы", bg=CLR_BG, font=("Arial", 8)).grid(row=2, column=2, sticky=tk.W, **grid_pad)
-        self.combo_operating_mode = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["operating_mode"], values=operating_mode_options, width=18, state="readonly"
+        self.combo_operating_mode = self._place_fmeca_lookup_combo(
+            advanced_frame, 2, 3, self.vars["operating_mode"], "operating_mode", width=16
         )
-        self.combo_operating_mode.grid(row=2, column=3, sticky=tk.W, **grid_pad)
         
         tk.Label(advanced_frame, text="Эффект верхнего уровня *", bg=CLR_BG, font=("Arial", 8)).grid(row=3, column=0, sticky=tk.W, **grid_pad)
-        self.combo_next_effect = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["next_higher_effect"], values=effect_options, width=26, state="readonly"
+        self.combo_next_effect = self._place_fmeca_lookup_combo(
+            advanced_frame, 3, 1, self.vars["next_higher_effect"], "effect", width=24
         )
-        self.combo_next_effect.grid(row=3, column=1, sticky=tk.W, **grid_pad)
         tk.Label(advanced_frame, text="Конечный эффект *", bg=CLR_BG, font=("Arial", 8)).grid(row=3, column=2, sticky=tk.W, **grid_pad)
-        self.combo_end_effect = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["end_effect"], values=effect_options, width=18, state="readonly"
+        self.combo_end_effect = self._place_fmeca_lookup_combo(
+            advanced_frame, 3, 3, self.vars["end_effect"], "effect", width=16
         )
-        self.combo_end_effect.grid(row=3, column=3, sticky=tk.W, **grid_pad)
         
         tk.Label(advanced_frame, text="Рекомендуемые меры *", bg=CLR_BG, font=("Arial", 8)).grid(row=4, column=0, sticky=tk.W, **grid_pad)
-        self.combo_actions = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["recommended_actions"], values=action_options, width=26, state="readonly"
+        self.combo_actions = self._place_fmeca_lookup_combo(
+            advanced_frame, 4, 1, self.vars["recommended_actions"], "action", width=24
         )
-        self.combo_actions.grid(row=4, column=1, sticky=tk.W, **grid_pad)
         tk.Label(advanced_frame, text="Ответственный *", bg=CLR_BG, font=("Arial", 8)).grid(row=4, column=2, sticky=tk.W, **grid_pad)
-        self.combo_owner = ttk.Combobox(
-            advanced_frame, textvariable=self.vars["action_owner"], values=owner_options, width=18, state="readonly"
+        self.combo_owner = self._place_fmeca_lookup_combo(
+            advanced_frame, 4, 3, self.vars["action_owner"], "owner", width=16
         )
-        self.combo_owner.grid(row=4, column=3, sticky=tk.W, **grid_pad)
         
         tk.Label(advanced_frame, text="Срок выполнения (ГГГГ-ММ-ДД) *", bg=CLR_BG, font=("Arial", 8)).grid(row=5, column=0, sticky=tk.W, **grid_pad)
         tk.Entry(advanced_frame, textvariable=self.vars["due_date"], width=28, font=("Arial", 9)).grid(row=5, column=1, sticky=tk.W, **grid_pad)
@@ -1533,13 +1696,36 @@ class RecordDialog:
         
         # Восстановление комбобоксов при редактировании
         category_name = data.get("category")
-        if category_name and category_name in self.category_data:
+        if category_name:
+            self._ensure_combobox_value(self.combo_category, category_name)
             self.combo_category.set(category_name)
             self.on_category_selected(None)
+        failure_type_name = data.get("failure_type")
+        if failure_type_name:
+            self._ensure_combobox_value(self.combo_failure_type, failure_type_name)
+            self.combo_failure_type.set(failure_type_name)
+            self.on_failure_type_selected(None)
         if data.get("cause"):
+            self._ensure_combobox_value(self.combo_cause, str(data.get("cause")))
             self.combo_cause.set(str(data.get("cause")))
         if data.get("effect"):
+            self._ensure_combobox_value(self.combo_effect, str(data.get("effect")))
             self.combo_effect.set(str(data.get("effect")))
+        
+        for combo, var_key, domain in [
+            (self.combo_function, "function_text", "function"),
+            (self.combo_local_effect, "local_effect", "effect"),
+            (self.combo_next_effect, "next_higher_effect", "effect"),
+            (self.combo_end_effect, "end_effect", "effect"),
+            (self.combo_mission_phase, "mission_phase", "mission_phase"),
+            (self.combo_operating_mode, "operating_mode", "operating_mode"),
+            (self.combo_actions, "recommended_actions", "action"),
+            (self.combo_owner, "action_owner", "owner"),
+        ]:
+            value = str(data.get(var_key, "")).strip()
+            if value:
+                self._ensure_combobox_value(combo, value)
+                combo.set(value)
         
         self._update_rpn()
         self._update_residual_rpn()
@@ -1588,22 +1774,7 @@ class RecordDialog:
             "residual_rpn": self.residual_vars["residual_rpn"].get().strip(),
         })
         
-        # ID из combobox
-        category_name = self.combo_category.get()
-        data["category_id"] = self.category_data.get(category_name)
-        data["failure_type_id"] = self.current_failure_type_id
-        
-        cause_name = self.combo_cause.get()
-        data["cause_id"] = self.cause_data.get(cause_name)
-        
-        effect_name = self.combo_effect.get()
-        data["effect_id"] = self.effect_data.get(effect_name)
-        
-        # Заполнение текстовых полей из combobox (если не заполнены вручную)
-        if not data.get("cause"):
-            data["cause"] = cause_name
-        if not data.get("effect"):
-            data["effect"] = effect_name
+        self._resolve_reference_ids(data)
         
         # Нормализация числовых полей (пустое -> None)
         for key in ["failure_rate_lambda", "mode_ratio_alpha", "conditional_prob_beta", "mission_time_t"]:
@@ -1665,6 +1836,112 @@ class RecordDialog:
         
         self.on_save(data)
         self.win.destroy()
+    
+    # ═══════════════════════════════════════════════════════════════════
+    #  СПРАВОЧНИКИ И ПОЛЬЗОВАТЕЛЬСКИЕ ЗНАЧЕНИЯ
+    # ═══════════════════════════════════════════════════════════════════
+    
+    def _place_fmeca_lookup_combo(self, parent, row, column, textvariable, domain, width=24):
+        """Combobox расширенного поля со справочником и кнопкой «+»."""
+        frame = tk.Frame(parent, bg=CLR_BG)
+        frame.grid(row=row, column=column, sticky=tk.W, padx=6, pady=3)
+        combo = ttk.Combobox(
+            frame, textvariable=textvariable,
+            values=self.db.get_fmeca_lookup_values(domain),
+            width=width, state="normal",
+        )
+        combo.pack(side=tk.LEFT)
+        tk.Button(
+            frame, text="+", width=2,
+            command=lambda c=combo, d=domain: self._add_fmeca_lookup_value(c, d),
+            bg=CLR_BTN_BLUE, fg="white", font=("Arial", 8, "bold"),
+            relief=tk.FLAT, cursor="hand2",
+        ).pack(side=tk.LEFT, padx=2)
+        return combo
+    
+    def _ensure_combobox_value(self, combo, value: str):
+        """Добавляет значение в список combobox, если его там ещё нет."""
+        value = (value or "").strip()
+        if not value:
+            return
+        values = list(combo["values"])
+        if value not in values:
+            combo["values"] = values + [value]
+    
+    def _add_fmeca_lookup_value(self, combo, domain: str):
+        """Добавление значения в справочник расширенного поля."""
+        name = simpledialog.askstring(
+            "Новое значение",
+            "Введите значение:",
+            parent=self.win,
+        )
+        if name:
+            name = name.strip()
+            if not name:
+                return
+            self.db.ensure_fmeca_lookup_value(domain, name)
+            combo["values"] = self.db.get_fmeca_lookup_values(domain)
+            combo.set(name)
+    
+    def _resolve_reference_ids(self, data: dict):
+        """Регистрация пользовательских значений в справочниках при сохранении."""
+        category_name = self.combo_category.get().strip()
+        if category_name:
+            if category_name not in self.category_data:
+                cat_id = self.db.add_category(category_name)
+                self.category_data[category_name] = cat_id
+            data["category_id"] = self.category_data[category_name]
+        
+        ft_name = self.combo_failure_type.get().strip()
+        if ft_name:
+            if ft_name in self.failure_type_data:
+                data["failure_type_id"] = self.failure_type_data[ft_name][0]
+            else:
+                ft_id = self.db.get_or_add_failure_type(ft_name)
+                if data.get("category_id"):
+                    self.db.link_category_to_failure_type(data["category_id"], ft_id)
+                data["failure_type_id"] = ft_id
+        elif self.current_failure_type_id:
+            data["failure_type_id"] = self.current_failure_type_id
+        
+        cause_name = self.combo_cause.get().strip()
+        if cause_name:
+            if cause_name in self.cause_data:
+                data["cause_id"] = self.cause_data[cause_name]
+            else:
+                cause_id = self.db.get_or_add_cause(cause_name)
+                ft_id = data.get("failure_type_id")
+                if ft_id:
+                    self.db.link_failure_type_to_cause(ft_id, cause_id)
+                data["cause_id"] = cause_id
+            data["cause"] = cause_name
+        
+        effect_name = self.combo_effect.get().strip()
+        if effect_name:
+            if effect_name in self.effect_data:
+                data["effect_id"] = self.effect_data[effect_name]
+            else:
+                effect_id = self.db.get_or_add_effect(effect_name)
+                ft_id = data.get("failure_type_id")
+                if ft_id:
+                    self.db.link_failure_type_to_effect(ft_id, effect_id)
+                data["effect_id"] = effect_id
+            data["effect"] = effect_name
+        
+        fmeca_field_domains = {
+            "function_text": "function",
+            "local_effect": "effect",
+            "next_higher_effect": "effect",
+            "end_effect": "effect",
+            "mission_phase": "mission_phase",
+            "operating_mode": "operating_mode",
+            "recommended_actions": "action",
+            "action_owner": "owner",
+        }
+        for field, domain in fmeca_field_domains.items():
+            value = (data.get(field) or "").strip()
+            if value:
+                self.db.ensure_fmeca_lookup_value(domain, value)
     
     # ═══════════════════════════════════════════════════════════════════
     #  ЗАГРУЗКА ДАННЫХ В COMBOBOX

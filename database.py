@@ -12,6 +12,62 @@ from model import FMEAModel
 class Database:
     """Класс для управления базой данных FMEA с расширенными справочниками."""
     
+    FMECA_LOOKUP_DEFAULTS = {
+        "function": [
+            "Обработка вычислительных задач",
+            "Хранение оперативных данных",
+            "Долговременное хранение данных",
+            "Стабилизация электропитания",
+            "Передача сетевого трафика",
+            "Охлаждение и теплоотвод",
+        ],
+        "effect": [
+            "Снижение производительности",
+            "Рост задержек",
+            "Сбой вычислительных модулей",
+            "Потеря доступности подсистемы",
+            "Риск потери данных",
+            "Срыв SLA/критичного сервиса",
+        ],
+        "mission_phase": [
+            "Проектирование",
+            "Интеграция",
+            "Испытания",
+            "Эксплуатация",
+            "Техническое обслуживание",
+        ],
+        "operating_mode": [
+            "Номинальный",
+            "Пиковая нагрузка",
+            "Резервный",
+            "Деградированный",
+            "Пуск/останов",
+        ],
+        "action": [
+            "Замена компонента",
+            "Плановое техническое обслуживание",
+            "Обновление прошивки/ПО",
+            "Усиление мониторинга",
+            "Изменение режима эксплуатации",
+        ],
+        "owner": [
+            "Инженер по надежности",
+            "Системный инженер",
+            "Инженер эксплуатации",
+            "DBA",
+            "Сетевой инженер",
+        ],
+    }
+    
+    FMECA_LOOKUP_LABELS = {
+        "function": "Функции компонентов",
+        "effect": "Эффекты",
+        "mission_phase": "Фазы миссии",
+        "operating_mode": "Режимы работы",
+        "action": "Рекомендуемые меры",
+        "owner": "Ответственные",
+    }
+    
     FAILURES_TABLE_MIGRATIONS = [
         ("function_text", "TEXT"),
         ("local_effect", "TEXT"),
@@ -47,6 +103,7 @@ class Database:
         self.cursor = self.connection.cursor()
         self._create_tables()
         self._populate_default_data()
+        self._populate_fmeca_lookups()
     
     def _create_tables(self):
         """Создание расширенной схемы БД."""
@@ -155,6 +212,16 @@ class Database:
                 FOREIGN KEY (failure_type_id) REFERENCES failure_types(id),
                 FOREIGN KEY (cause_id) REFERENCES failure_causes(id),
                 FOREIGN KEY (effect_id) REFERENCES failure_effects(id)
+            )
+        """)
+        
+        # 10. Справочники расширенных полей FMECA
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fmeca_lookup_values (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                domain TEXT NOT NULL,
+                name TEXT NOT NULL,
+                UNIQUE(domain, name)
             )
         """)
         
@@ -320,6 +387,54 @@ class Database:
         
         self.connection.commit()
     
+    def _populate_fmeca_lookups(self):
+        """Заполнение справочников расширенных полей FMECA значениями по умолчанию."""
+        for domain, values in self.FMECA_LOOKUP_DEFAULTS.items():
+            self.cursor.execute(
+                "SELECT COUNT(*) FROM fmeca_lookup_values WHERE domain = ?",
+                (domain,),
+            )
+            if self.cursor.fetchone()[0] > 0:
+                continue
+            for name in values:
+                self.ensure_fmeca_lookup_value(domain, name)
+    
+    # ===== СПРАВОЧНИКИ РАСШИРЕННЫХ ПОЛЕЙ FMECA =====
+    
+    def get_fmeca_lookup_values(self, domain: str) -> List[str]:
+        """Получение значений справочника расширенного поля."""
+        return [name for _, name in self.get_all_fmeca_lookups(domain)]
+    
+    def get_all_fmeca_lookups(self, domain: str) -> List[Tuple[int, str]]:
+        """Получение всех записей справочника расширенного поля (id, name)."""
+        self.cursor.execute(
+            "SELECT id, name FROM fmeca_lookup_values WHERE domain = ? ORDER BY name",
+            (domain,),
+        )
+        return self.cursor.fetchall()
+    
+    def delete_fmeca_lookup(self, lookup_id: int) -> Tuple[bool, str]:
+        """Удаление значения справочника расширенного поля."""
+        self.cursor.execute("DELETE FROM fmeca_lookup_values WHERE id = ?", (lookup_id,))
+        if self.cursor.rowcount == 0:
+            return False, "Запись не найдена."
+        self.connection.commit()
+        return True, ""
+    
+    def ensure_fmeca_lookup_value(self, domain: str, name: str) -> None:
+        """Добавление значения в справочник, если его ещё нет."""
+        name = (name or "").strip()
+        if not name:
+            return
+        try:
+            self.cursor.execute(
+                "INSERT INTO fmeca_lookup_values (domain, name) VALUES (?, ?)",
+                (domain, name),
+            )
+            self.connection.commit()
+        except sqlite3.IntegrityError:
+            pass
+    
     # ===== КОМПОНЕНТЫ И КАТЕГОРИИ =====
     
     def get_all_categories(self) -> List[Tuple[int, str]]:
@@ -342,6 +457,28 @@ class Database:
                 "SELECT id FROM component_categories WHERE name = ?", (name,)
             )
             return self.cursor.fetchone()[0]
+    
+    def delete_category(self, category_id: int) -> Tuple[bool, str]:
+        """Удаление категории компонента."""
+        self.cursor.execute(
+            "SELECT COUNT(*) FROM components WHERE category_id = ?", (category_id,)
+        )
+        if self.cursor.fetchone()[0] > 0:
+            return False, "Категория используется компонентами. Сначала измените или удалите связанные записи."
+        self.cursor.execute(
+            "DELETE FROM category_failure_type WHERE category_id = ?", (category_id,)
+        )
+        self.cursor.execute(
+            "DELETE FROM component_categories WHERE id = ?", (category_id,)
+        )
+        self.connection.commit()
+        return True, ""
+    
+    def get_category_usage_count(self, category_id: int) -> int:
+        self.cursor.execute(
+            "SELECT COUNT(*) FROM components WHERE category_id = ?", (category_id,)
+        )
+        return self.cursor.fetchone()[0]
     
     def add_component(self, system: str, subsystem: str, component: str,
                      category_id: Optional[int] = None, description: str = "") -> int:
@@ -383,6 +520,35 @@ class Database:
         self.connection.commit()
         return self.cursor.lastrowid
     
+    def delete_failure_type(self, failure_type_id: int) -> Tuple[bool, str]:
+        """Удаление типа отказа."""
+        self.cursor.execute(
+            "SELECT COUNT(*) FROM failures WHERE failure_type_id = ?", (failure_type_id,)
+        )
+        if self.cursor.fetchone()[0] > 0:
+            return False, "Тип отказа используется в записях FMEA."
+        self.cursor.execute(
+            "DELETE FROM category_failure_type WHERE failure_type_id = ?", (failure_type_id,)
+        )
+        self.cursor.execute(
+            "DELETE FROM failure_type_cause WHERE failure_type_id = ?", (failure_type_id,)
+        )
+        self.cursor.execute(
+            "DELETE FROM failure_type_effect WHERE failure_type_id = ?", (failure_type_id,)
+        )
+        self.cursor.execute("DELETE FROM failure_types WHERE id = ?", (failure_type_id,))
+        self.connection.commit()
+        return True, ""
+    
+    def get_or_add_failure_type(self, name: str) -> int:
+        """Получение ID типа отказа или создание нового."""
+        name = (name or "").strip()
+        self.cursor.execute("SELECT id FROM failure_types WHERE name = ?", (name,))
+        row = self.cursor.fetchone()
+        if row:
+            return row[0]
+        return self.add_failure_type(name)
+    
     def link_category_to_failure_type(self, category_id: int, failure_type_id: int):
         """Связывание категории и типа отказа."""
         try:
@@ -421,6 +587,27 @@ class Database:
         self.connection.commit()
         return self.cursor.lastrowid
     
+    def delete_cause(self, cause_id: int) -> Tuple[bool, str]:
+        """Удаление причины отказа."""
+        self.cursor.execute("SELECT COUNT(*) FROM failures WHERE cause_id = ?", (cause_id,))
+        if self.cursor.fetchone()[0] > 0:
+            return False, "Причина используется в записях FMEA."
+        self.cursor.execute(
+            "DELETE FROM failure_type_cause WHERE cause_id = ?", (cause_id,)
+        )
+        self.cursor.execute("DELETE FROM failure_causes WHERE id = ?", (cause_id,))
+        self.connection.commit()
+        return True, ""
+    
+    def get_or_add_cause(self, name: str) -> int:
+        """Получение ID причины или создание новой."""
+        name = (name or "").strip()
+        self.cursor.execute("SELECT id FROM failure_causes WHERE name = ?", (name,))
+        row = self.cursor.fetchone()
+        if row:
+            return row[0]
+        return self.add_cause(name)
+    
     def link_failure_type_to_cause(self, failure_type_id: int, cause_id: int):
         """Связывание типа отказа и причины."""
         try:
@@ -458,6 +645,27 @@ class Database:
         )
         self.connection.commit()
         return self.cursor.lastrowid
+    
+    def delete_effect(self, effect_id: int) -> Tuple[bool, str]:
+        """Удаление последствия отказа."""
+        self.cursor.execute("SELECT COUNT(*) FROM failures WHERE effect_id = ?", (effect_id,))
+        if self.cursor.fetchone()[0] > 0:
+            return False, "Последствие используется в записях FMEA."
+        self.cursor.execute(
+            "DELETE FROM failure_type_effect WHERE effect_id = ?", (effect_id,)
+        )
+        self.cursor.execute("DELETE FROM failure_effects WHERE id = ?", (effect_id,))
+        self.connection.commit()
+        return True, ""
+    
+    def get_or_add_effect(self, name: str) -> int:
+        """Получение ID последствия или создание нового."""
+        name = (name or "").strip()
+        self.cursor.execute("SELECT id FROM failure_effects WHERE name = ?", (name,))
+        row = self.cursor.fetchone()
+        if row:
+            return row[0]
+        return self.add_effect(name)
     
     def link_failure_type_to_effect(self, failure_type_id: int, effect_id: int):
         """Связывание типа отказа и последствия."""
@@ -587,14 +795,29 @@ class Database:
                 f.local_effect,
                 f.next_higher_effect,
                 f.end_effect,
+                f.failure_effect,
                 f.severity,
                 f.occurrence,
                 f.detection,
                 f.rpn,
                 f.mil_criticality,
+                f.failure_rate_lambda,
+                f.mode_ratio_alpha,
+                f.conditional_prob_beta,
+                f.mission_time_t,
+                f.current_controls,
                 f.recommended_actions,
                 f.action_owner,
                 f.due_date,
+                f.action_status,
+                f.mission_phase,
+                f.operating_mode,
+                f.is_single_point,
+                f.is_latent,
+                f.is_common_cause,
+                f.residual_severity,
+                f.residual_occurrence,
+                f.residual_detection,
                 f.residual_rpn
             FROM failures f
             JOIN components c ON f.component_id = c.id
@@ -731,7 +954,8 @@ class Database:
             SELECT f.id, c.system, c.subsystem, c.component,
                    cc.name AS category,
                    c.category_id,
-                   f.failure_type_id, f.cause_id, f.effect_id,
+                   f.failure_type_id, ft.name AS failure_type,
+                   f.cause_id, f.effect_id,
                    f.failure_mode, f.failure_cause, f.failure_effect,
                    f.severity, f.occurrence, f.detection, f.rpn,
                    f.function_text, f.local_effect, f.next_higher_effect, f.end_effect,
@@ -742,6 +966,7 @@ class Database:
             FROM failures f
             JOIN components c ON f.component_id = c.id
             LEFT JOIN component_categories cc ON c.category_id = cc.id
+            LEFT JOIN failure_types ft ON f.failure_type_id = ft.id
             WHERE f.id = ?
         """, (failure_id,))
         row = self.cursor.fetchone()
@@ -756,32 +981,33 @@ class Database:
             "category": row[4],
             "category_id": row[5],
             "failure_type_id": row[6],
-            "cause_id": row[7],
-            "effect_id": row[8],
-            "failure_mode": row[9],
-            "cause": row[10],
-            "effect": row[11],
-            "severity": row[12],
-            "occurrence": row[13],
-            "detection": row[14],
-            "rpn": row[15],
-            "function_text": row[16],
-            "local_effect": row[17],
-            "next_higher_effect": row[18],
-            "end_effect": row[19],
-            "recommended_actions": row[20],
-            "action_owner": row[21],
-            "due_date": row[22],
-            "failure_rate_lambda": row[23],
-            "mode_ratio_alpha": row[24],
-            "conditional_prob_beta": row[25],
-            "mission_time_t": row[26],
-            "mission_phase": row[27],
-            "operating_mode": row[28],
-            "residual_severity": row[29],
-            "residual_occurrence": row[30],
-            "residual_detection": row[31],
-            "residual_rpn": row[32],
+            "failure_type": row[7],
+            "cause_id": row[8],
+            "effect_id": row[9],
+            "failure_mode": row[10],
+            "cause": row[11],
+            "effect": row[12],
+            "severity": row[13],
+            "occurrence": row[14],
+            "detection": row[15],
+            "rpn": row[16],
+            "function_text": row[17],
+            "local_effect": row[18],
+            "next_higher_effect": row[19],
+            "end_effect": row[20],
+            "recommended_actions": row[21],
+            "action_owner": row[22],
+            "due_date": row[23],
+            "failure_rate_lambda": row[24],
+            "mode_ratio_alpha": row[25],
+            "conditional_prob_beta": row[26],
+            "mission_time_t": row[27],
+            "mission_phase": row[28],
+            "operating_mode": row[29],
+            "residual_severity": row[30],
+            "residual_occurrence": row[31],
+            "residual_detection": row[32],
+            "residual_rpn": row[33],
         }
     
     def update_failure_extended(self, failure_id: int, data: Dict):

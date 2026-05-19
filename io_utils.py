@@ -1,11 +1,10 @@
 """
-Модуль импорта/экспорта данных.
-Улучшенная поддержка русского языка в PDF.
+Модуль импорта/экспорта данных FMEA/FMECA.
 """
 
 import xml.etree.ElementTree as ET
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Optional
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, 
@@ -16,6 +15,9 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import os
+
+from standards import REPORT_TITLE, REPORT_SUBTITLE, format_rpn_thresholds_plain
+from model import FMEAModel
 
 
 class IOUtils:
@@ -64,283 +66,251 @@ class IOUtils:
         return failures
     
     @staticmethod
-    def export_to_excel(df: pd.DataFrame, filepath: str, standardized_df: pd.DataFrame = None):
-        """Экспорт FMEA-таблицы в Excel (с опциональным стандартизированным FMECA листом)."""
+    def export_to_excel(
+        df: pd.DataFrame,
+        filepath: str,
+        standardized_df: pd.DataFrame = None,
+        comprehensive_df: pd.DataFrame = None,
+    ):
+        """Экспорт FMEA/FMECA в Excel со всеми листами отчётности."""
         with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            # Основная таблица
             df.to_excel(writer, sheet_name='FMEA Analysis', index=False)
             
-            # Новый стандартизированный FMECA лист (без ломки старого экспорта)
+            if comprehensive_df is not None and not comprehensive_df.empty:
+                comprehensive_df.to_excel(writer, sheet_name='FMECA полный', index=False)
+                FMEAModel.build_mil_quantitative_sheet(comprehensive_df).to_excel(
+                    writer, sheet_name='Количественная критичность', index=False
+                )
+                FMEAModel.build_analysis_summary(comprehensive_df).to_excel(
+                    writer, sheet_name='Сводка анализа', index=False
+                )
+                before_after_ru = comprehensive_df[
+                    ["№", "Компонент", "Вид отказа", "RPN до мер", "RPN после мер", "Снижение риска"]
+                ].copy()
+                before_after_ru.to_excel(writer, sheet_name='До-После мер', index=False)
+                comprehensive_df.nlargest(20, "RPN").to_excel(
+                    writer, sheet_name='Топ-20 по RPN', index=False
+                )
+                if "Критичность Cm" in comprehensive_df.columns:
+                    comprehensive_df.sort_values(
+                        by=["Критичность Cm", "RPN"],
+                        ascending=[False, False],
+                        na_position="last",
+                    ).head(20).to_excel(writer, sheet_name='Топ-20 по Cm', index=False)
+            
             if standardized_df is not None and not standardized_df.empty:
                 standardized_df.to_excel(writer, sheet_name='FMECA Standardized', index=False)
-                
-                # Before/After блок отдельным листом для наглядности
                 before_after_cols = [
                     "ID", "Component", "Failure Mode",
-                    "Before Actions (RPN)", "After Actions (Residual RPN)", "Risk Reduction"
+                    "Before Actions (RPN)", "After Actions (Residual RPN)", "Risk Reduction",
                 ]
-                before_after_df = standardized_df[
+                standardized_df[
                     [c for c in before_after_cols if c in standardized_df.columns]
-                ].copy()
-                before_after_df.to_excel(writer, sheet_name='Before-After Actions', index=False)
-                
-                # Сортировка по MIL criticality
+                ].to_excel(writer, sheet_name='Before-After Actions', index=False)
                 if "MIL Criticality" in standardized_df.columns:
                     standardized_df.sort_values(
                         by=["MIL Criticality", "RPN"],
                         ascending=[False, False],
-                        na_position="last"
+                        na_position="last",
                     ).to_excel(writer, sheet_name='Top by MIL', index=False)
             
-            # Статистика
             stats = {
                 'Показатель': [
                     'Всего отказов', 'Средний RPN', 'Макс RPN',
                     'Мин RPN', 'Критических', 'Высоких',
-                    'Средних', 'Низких'
+                    'Средних', 'Низких',
                 ],
                 'Значение': [
                     len(df),
-                    round(df['RPN'].mean(), 2),
-                    df['RPN'].max(),
-                    df['RPN'].min(),
+                    round(df['RPN'].mean(), 2) if len(df) else 0,
+                    df['RPN'].max() if len(df) else 0,
+                    df['RPN'].min() if len(df) else 0,
                     len(df[df['RPN'] >= 200]),
                     len(df[(df['RPN'] >= 100) & (df['RPN'] < 200)]),
                     len(df[(df['RPN'] >= 40) & (df['RPN'] < 100)]),
-                    len(df[df['RPN'] < 40])
-                ]
+                    len(df[df['RPN'] < 40]),
+                ],
             }
-            stats_df = pd.DataFrame(stats)
-            stats_df.to_excel(writer, sheet_name='Статистика', index=False)
+            pd.DataFrame(stats).to_excel(writer, sheet_name='Статистика RPN', index=False)
+            df.nlargest(10, 'RPN').to_excel(writer, sheet_name='Топ-10 рисков', index=False)
             
-            # Топ-рисков
-            top_risks = df.nlargest(10, 'RPN')
-            top_risks.to_excel(writer, sheet_name='Топ-10 рисков', index=False)
+            methodology = pd.DataFrame({
+                "Раздел": ["Пороги категорий риска по RPN"],
+                "Содержание": [format_rpn_thresholds_plain()],
+            })
+            methodology.to_excel(writer, sheet_name='Справка', index=False)
     
     @staticmethod
-    def export_to_pdf(df: pd.DataFrame, filepath: str, 
-                     include_charts: bool = False, chart_paths: List[str] = None,
-                     standardized_df: pd.DataFrame = None):
-        """
-        Экспорт FMEA-таблицы в PDF с поддержкой русского языка.
-        """
-        # Регистрация шрифтов
+    def _pdf_styles():
         IOUtils._register_fonts()
-        
-        doc = SimpleDocTemplate(filepath, pagesize=landscape(A4),
-                               leftMargin=1*cm, rightMargin=1*cm,
-                               topMargin=1.5*cm, bottomMargin=1.5*cm)
-        elements = []
-        
-        # Создание стилей с поддержкой кириллицы
         styles = getSampleStyleSheet()
-        
-        # Стиль заголовка
         title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Title'],
-            fontName='DejaVuSans-Bold',
-            fontSize=16,
-            alignment=TA_CENTER,
-            spaceAfter=20
+            'CustomTitle', parent=styles['Title'],
+            fontName='DejaVuSans-Bold', fontSize=15, alignment=TA_CENTER, spaceAfter=14,
         )
-        
-        # Стиль обычного текста
+        section_style = ParagraphStyle(
+            'SectionTitle', parent=styles['Heading2'],
+            fontName='DejaVuSans-Bold', fontSize=11, spaceAfter=8,
+        )
         normal_style = ParagraphStyle(
-            'CustomNormal',
-            parent=styles['Normal'],
-            fontName='DejaVuSans',
-            fontSize=10,
-            alignment=TA_LEFT
+            'CustomNormal', parent=styles['Normal'],
+            fontName='DejaVuSans', fontSize=9, alignment=TA_LEFT,
         )
-        
-        # Заголовок
-        title = Paragraph("<b>Отчёт FMEA/FMECA Analysis</b>", title_style)
-        elements.append(title)
-        elements.append(Spacer(1, 0.5*cm))
-        
-        # Статистика
-        stats_text = f"""
-        <b>Общая статистика:</b><br/>
-        Всего отказов: {len(df)}<br/>
-        Средний RPN: {df['RPN'].mean():.2f}<br/>
-        Максимальный RPN: {df['RPN'].max()}<br/>
-        Критических рисков (RPN ≥ 200): {len(df[df['RPN'] >= 200])}<br/>
-        Высоких рисков (100 ≤ RPN &lt; 200): {len(df[(df['RPN'] >= 100) & (df['RPN'] < 200)])}<br/>
-        """
-        elements.append(Paragraph(stats_text, normal_style))
-        elements.append(Spacer(1, 0.5*cm))
-        
-        # Таблица (сокращённая для PDF)
-        df_top = df.nlargest(20, 'RPN') if len(df) > 20 else df
-        
-        # ИСПРАВЛЕНО: Добавлена колонка "Категория"
-        table_data = [['№', 'Компонент', 'Категория', 'Вид отказа', 'S', 'O', 'D', 'RPN']]
-        
-        for idx, row in enumerate(df_top.itertuples(), 1):
+        return title_style, section_style, normal_style
+    
+    @staticmethod
+    def _dataframe_to_pdf_table(
+        data_df: pd.DataFrame,
+        columns: List[str],
+        header_bg: str = '#4472C4',
+        font_size: int = 7,
+        max_cell_len: int = 28,
+    ) -> Table:
+        """Преобразование DataFrame в ReportLab Table (все строки)."""
+        cols = [c for c in columns if c in data_df.columns]
+        table_data = [cols]
+        for _, row in data_df.iterrows():
             table_data.append([
-                str(idx),
-                str(row.Компонент)[:20],
-                str(row.Категория)[:15],
-                str(row._6)[:30],  # ИСПРАВЛЕНО: индекс "Вид отказа"
-                str(row.S),
-                str(row.O),
-                str(row.D),
-                str(row.RPN)
+                str(row.get(c, ""))[:max_cell_len] if row.get(c, "") is not None else ""
+                for c in cols
             ])
-        
-        # Создание таблицы
-        table = Table(table_data, colWidths=[1*cm, 3.5*cm, 2.5*cm, 5*cm, 1*cm, 1*cm, 1*cm, 1.5*cm])
+        ncols = max(len(cols), 1)
+        table = Table(table_data, repeatRows=1)
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4472C4')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(header_bg)),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'DejaVuSans-Bold'),
             ('FONTNAME', (0, 1), (-1, -1), 'DejaVuSans'),
-            ('FONTSIZE', (0, 0), (-1, 0), 9),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('FONTSIZE', (0, 0), (-1, -1), font_size),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')]),
         ]))
+        return table
+    
+    @staticmethod
+    def export_to_pdf(
+        df: pd.DataFrame,
+        filepath: str,
+        include_charts: bool = False,
+        chart_paths: List[str] = None,
+        standardized_df: pd.DataFrame = None,
+        comprehensive_df: pd.DataFrame = None,
+        full_report: bool = False,
+    ):
+        """Экспорт FMEA/FMECA в PDF."""
+        title_style, section_style, normal_style = IOUtils._pdf_styles()
+        doc = SimpleDocTemplate(
+            filepath, pagesize=landscape(A4),
+            leftMargin=0.8 * cm, rightMargin=0.8 * cm,
+            topMargin=1.2 * cm, bottomMargin=1.2 * cm,
+        )
+        elements = []
         
-        # Цветовая индикация RPN
-        for i, row in enumerate(df_top.itertuples(), 1):
-            rpn = row.RPN
-            if rpn >= 200:
-                bg_color = colors.HexColor('#FF6B6B')
-            elif rpn >= 100:
-                bg_color = colors.HexColor('#FFD93D')
-            elif rpn >= 40:
-                bg_color = colors.HexColor('#FFF68F')
-            else:
-                bg_color = colors.HexColor('#C1FFC1')
+        elements.append(Paragraph(f"<b>{REPORT_TITLE}</b>", title_style))
+        elements.append(Paragraph(f"<i>{REPORT_SUBTITLE}</i>", normal_style))
+        elements.append(Spacer(1, 0.3 * cm))
+        if len(df):
+            stats_text = (
+                f"<b>Статистика RPN:</b><br/>"
+                f"Всего отказов: {len(df)}; средний RPN: {df['RPN'].mean():.2f}; "
+                f"макс. RPN: {df['RPN'].max()}; критических (≥200): {len(df[df['RPN'] >= 200])}; "
+                f"высоких (100–199): {len(df[(df['RPN'] >= 100) & (df['RPN'] < 200)])}.<br/>"
+                f"<i>Пороги: {format_rpn_thresholds_plain()}</i>"
+            )
+            elements.append(Paragraph(stats_text, normal_style))
+            elements.append(Spacer(1, 0.3 * cm))
+        
+        comp = comprehensive_df
+        if comp is None or comp.empty:
+            comp = None
+        
+        if comp is not None:
+            summary = FMEAModel.build_analysis_summary(comp)
+            elements.append(Paragraph("<b>Сводка анализа</b>", section_style))
+            elements.append(IOUtils._dataframe_to_pdf_table(summary, list(summary.columns), '#2A9D8F', 8))
+            elements.append(Spacer(1, 0.4 * cm))
             
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (7, i), (7, i), bg_color)
-            ]))
+            sections = [
+                ("1. Идентификация объекта и отказа", [
+                    "№", "Система", "Подсистема", "Компонент", "Категория",
+                    "Функция", "Вид отказа", "Причина",
+                ], '#1565C0'),
+                ("2. Эффекты и оценка риска", [
+                    "№", "Локальный эффект", "Эффект верхнего уровня", "Конечный эффект",
+                    "S", "O", "D", "RPN", "Категория риска",
+                    "Класс тяжести", "Уровень вероятности",
+                    "Тяжесть (описание)", "Вероятность (описание)", "Обнаруживаемость (описание)",
+                ], '#6A1B9A'),
+                ("3. Количественная критичность (λ, α, β, t)", [
+                    "№", "Компонент", "Вид отказа", "λ (1/ч)", "α", "β", "t (ч)",
+                    "Критичность Cm", "RPN",
+                ], '#2E7D32'),
+                ("4. Меры и остаточный риск", [
+                    "№", "Текущие меры контроля", "Рекомендуемые меры",
+                    "Ответственный", "Срок", "Статус мер",
+                    "RPN до мер", "RPN после мер", "Снижение риска",
+                    "S ост.", "O ост.", "D ост.",
+                ], '#E65100'),
+                ("5. Контекст эксплуатации и признаки", [
+                    "№", "Фаза миссии", "Режим работы", "ОПФ", "Скрытый отказ", "ОППО",
+                    "Полнота анализа, %",
+                ], '#455A64'),
+            ]
+            row_limit = None if full_report else 25
+            comp_sorted = comp.sort_values(by=["RPN"], ascending=False, na_position="last")
+            if row_limit:
+                comp_sorted = comp_sorted.head(row_limit)
+            
+            for title, cols, color in sections:
+                elements.append(PageBreak())
+                elements.append(Paragraph(f"<b>{title}</b>", section_style))
+                if row_limit and len(comp) > row_limit:
+                    elements.append(Paragraph(
+                        f"<i>Показаны топ-{row_limit} записей по RPN (полная таблица — в Excel).</i>",
+                        normal_style,
+                    ))
+                elements.append(Spacer(1, 0.15 * cm))
+                elements.append(IOUtils._dataframe_to_pdf_table(comp_sorted, cols, color, 6, 22))
+        else:
+            df_show = df if full_report or len(df) <= 30 else df.nlargest(30, 'RPN')
+            elements.append(Paragraph("<b>Реестр отказов (базовая таблица)</b>", section_style))
+            basic_cols = ['ID', 'Система', 'Подсистема', 'Компонент', 'Категория',
+                          'Вид отказа', 'S', 'O', 'D', 'RPN', 'Категория риска']
+            basic_cols = [c for c in basic_cols if c in df_show.columns]
+            elements.append(IOUtils._dataframe_to_pdf_table(df_show, basic_cols))
         
-        elements.append(table)
-        elements.append(Spacer(1, 1*cm))
-        
-        # Стандартизированный FMECA-блок (опционально)
         if standardized_df is not None and not standardized_df.empty:
             elements.append(PageBreak())
-            elements.append(Paragraph("<b>Стандартизированная таблица FMECA</b>", title_style))
-            elements.append(Spacer(1, 0.4*cm))
-            
-            # Сортировка по RPN
-            by_rpn = standardized_df.sort_values(by=["RPN"], ascending=[False]).head(15)
-            elements.append(Paragraph("<b>Сортировка: по RPN</b>", normal_style))
-            elements.append(Spacer(1, 0.2*cm))
-            
-            rpn_table_data = [[
-                "Component", "Function", "Failure Mode", "Cause",
-                "Local", "Next", "End", "S", "O", "D", "RPN", "MIL",
-                "Action", "Owner", "Due", "Before", "After"
-            ]]
-            for _, row in by_rpn.iterrows():
-                rpn_table_data.append([
-                    str(row.get("Component", ""))[:16],
-                    str(row.get("Function", ""))[:14],
-                    str(row.get("Failure Mode", ""))[:18],
-                    str(row.get("Cause", ""))[:18],
-                    str(row.get("Local Effect", ""))[:14],
-                    str(row.get("Next Higher Effect", ""))[:14],
-                    str(row.get("End Effect", ""))[:14],
-                    str(row.get("Severity", "")),
-                    str(row.get("Occurrence", "")),
-                    str(row.get("Detection", "")),
-                    str(row.get("RPN", "")),
-                    str(row.get("MIL Criticality", "")),
-                    str(row.get("Recommended Actions", ""))[:16],
-                    str(row.get("Action Owner", ""))[:12],
-                    str(row.get("Due Date", ""))[:12],
-                    str(row.get("Before Actions (RPN)", "")),
-                    str(row.get("After Actions (Residual RPN)", "")),
-                ])
-            
-            std_table = Table(
-                rpn_table_data,
-                colWidths=[1.7*cm, 1.7*cm, 2.0*cm, 2.0*cm, 1.4*cm, 1.4*cm, 1.4*cm,
-                           0.7*cm, 0.7*cm, 0.7*cm, 0.9*cm, 1.2*cm, 1.8*cm, 1.4*cm, 1.2*cm, 1.0*cm, 1.0*cm]
-            )
-            std_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#264653')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('FONTNAME', (0, 0), (-1, 0), 'DejaVuSans-Bold'),
-                ('FONTNAME', (0, 1), (-1, -1), 'DejaVuSans'),
-                ('FONTSIZE', (0, 0), (-1, 0), 7),
-                ('FONTSIZE', (0, 1), (-1, -1), 6),
-                ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
-            elements.append(std_table)
-            elements.append(Spacer(1, 0.3*cm))
-            
-            # Сортировка по MIL criticality
-            if "MIL Criticality" in standardized_df.columns:
-                by_mil = standardized_df.sort_values(
-                    by=["MIL Criticality", "RPN"],
-                    ascending=[False, False],
-                    na_position="last"
-                ).head(10)
-                elements.append(Paragraph("<b>Сортировка: по MIL criticality</b>", normal_style))
-                elements.append(Spacer(1, 0.2*cm))
-                
-                mil_table_data = [["Component", "Failure Mode", "MIL", "RPN", "Before", "After", "Risk Reduction"]]
-                for _, row in by_mil.iterrows():
-                    mil_table_data.append([
-                        str(row.get("Component", ""))[:24],
-                        str(row.get("Failure Mode", ""))[:28],
-                        str(row.get("MIL Criticality", "")),
-                        str(row.get("RPN", "")),
-                        str(row.get("Before Actions (RPN)", "")),
-                        str(row.get("After Actions (Residual RPN)", "")),
-                        str(row.get("Risk Reduction", "")),
-                    ])
-                
-                mil_table = Table(mil_table_data, colWidths=[4.2*cm, 5.0*cm, 2.2*cm, 1.4*cm, 1.7*cm, 1.7*cm, 2.1*cm])
-                mil_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2A9D8F')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('FONTNAME', (0, 0), (-1, 0), 'DejaVuSans-Bold'),
-                    ('FONTNAME', (0, 1), (-1, -1), 'DejaVuSans'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 8),
-                    ('FONTSIZE', (0, 1), (-1, -1), 7),
-                    ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ]))
-                elements.append(mil_table)
+            elements.append(Paragraph("<b>Таблица FMECA (сводный формат)</b>", section_style))
+            std_cols = [
+                "ID", "Component", "Function", "Failure Mode", "Cause",
+                "Local Effect", "Next Higher Effect", "End Effect",
+                "Severity", "Occurrence", "Detection", "RPN", "MIL Criticality",
+                "Recommended Actions", "Action Owner", "Due Date",
+                "Before Actions (RPN)", "After Actions (Residual RPN)", "Risk Reduction",
+            ]
+            std_df = standardized_df if full_report else standardized_df.head(25)
+            elements.append(IOUtils._dataframe_to_pdf_table(std_df, std_cols, '#264653', 6, 20))
         
-        # Добавление графиков (если указаны)
         if include_charts and chart_paths:
             elements.append(PageBreak())
-            elements.append(Paragraph("<b>Визуализация результатов</b>", title_style))
-            elements.append(Spacer(1, 0.5*cm))
-            
+            elements.append(Paragraph("<b>Визуализация результатов</b>", section_style))
+            elements.append(Spacer(1, 0.3 * cm))
             for chart_path in chart_paths:
                 if os.path.exists(chart_path):
                     try:
-                        img = Image(chart_path, width=18*cm, height=12*cm)
-                        elements.append(img)
-                        elements.append(Spacer(1, 0.5*cm))
-                    except:
+                        elements.append(Image(chart_path, width=18 * cm, height=11 * cm))
+                        elements.append(Spacer(1, 0.4 * cm))
+                    except Exception:
                         pass
         
-        # Сноска
-        footer_text = """
-        <br/><br/>
-        <i>Отчёт сформирован автоматически средствами FMEA/FMECA Analysis Tool<br/>
-        Соответствие стандартам: MIL-STD-1629A, IEC 60812, ГОСТ 27.310-95</i>
-        """
-        elements.append(Spacer(1, 1*cm))
-        elements.append(Paragraph(footer_text, normal_style))
-        
-        # Сборка документа
+        elements.append(Spacer(1, 0.5 * cm))
+        elements.append(Paragraph(
+            "<i>Отчёт сформирован автоматически средствами FMEA/FMECA Analysis Tool.</i>",
+            normal_style,
+        ))
         doc.build(elements)
     
     @staticmethod

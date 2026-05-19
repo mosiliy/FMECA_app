@@ -21,7 +21,7 @@ class TestExplainRisk(unittest.TestCase):
         }
         text = FMEAModel.explain_risk(failure)
         self.assertIn("RPN:", text)
-        self.assertIn("MIL criticality:", text)
+        self.assertIn("Критичность Cm:", text)
         self.assertIn("Влияние на систему:", text)
         self.assertIn("Рекомендации:", text)
 

@@ -1,61 +1,121 @@
 # FMEA / FMECA Analysis Tool
 
+Настольное приложение для анализа видов отказов, последствий и критичности (**FMEA / FMECA**) в области вычислительной техники и ЦОД.
+
 ---
 
 ## Русский
 
 ### Описание
 
-Настольное приложение для анализа видов отказов, последствий и критичности (**FMEA / FMECA**) в области вычислительной техники. Реализовано на **Python** с графическим интерфейсом **Tkinter**, хранением данных в **SQLite** и поддержкой импорта/экспорта, отчётов и визуализации.
+Реализовано на **Python 3.10+**, графический интерфейс **Tkinter**, хранение в **SQLite**. Поддерживаются справочники, расширенные поля FMECA, расчёт RPN и количественной критичности, импорт/экспорт, отчёты и визуализация.
 
-### Возможности
+### Основные возможности
 
-- Ведение записей отказов с привязкой к системе, подсистеме, компоненту и справочникам (категории, типы отказов, причины, последствия).
-- Расчёт **RPN** (Severity × Occurrence × Detection) и **MIL-критичности режима** при наличии параметров λ, α, β и времени миссии.
-- Расширенная структура FMECA: функция, локальный/верхний/конечный эффекты, меры и остаточный риск.
-- Импорт из **XML**, экспорт в **Excel** и **PDF** (в т.ч. кириллица через шрифты в каталоге `fonts/`).
-- Полный отчёт с графиками, матрица критичности, граф зависимостей.
-- Панель **качества анализа**, текстовое **объяснение риска**, фильтрация и очистка записей, не соответствующих актуальной структуре.
-- **Add-only миграции** схемы БД для совместимости со старыми файлами базы.
+**Записи FMEA/FMECA**
+- Иерархия: система → подсистема → компонент → вид отказа.
+- Оценки **S, O, D** (1–10) и автоматический расчёт **RPN = S × O × D**.
+- Расширенные поля: функция, локальный / верхний / конечный эффекты, текущие меры, рекомендации, ответственный, срок, статус.
+- Параметры надёжности **λ, α, β, t** и расчёт **критичности Cm = λ × α × β × t**.
+- Остаточный риск: **S/O/D после мер** и **RPN после мер** (см. раздел «RPN до и после мер» ниже).
+- Признаки: ОПФ, скрытый отказ, ОППО; фаза миссии, режим работы.
+
+**Справочники**
+- Категории компонентов, типы отказов, причины, последствия.
+- Справочники расширенных полей (функции, эффекты, меры, ответственные и т.д.).
+- Добавление и **удаление** записей в справочниках (удаление блокируется, если значение используется в записях FMEA).
+- В форме записи — свободный ввод и кнопка «+» для пользовательских значений.
+
+**Анализ и качество**
+- Категории риска по RPN: низкий (&lt;40), средний (40–99), высокий (100–199), критический (≥200).
+- Панель **качества анализа** (полнота заполнения полей).
+- **Объяснить риск** — текстовая сводка по выбранной записи.
+- Фильтр по таблице, режим «только актуальные» записи, очистка неактуальных.
+
+**Визуализация**
+- Распределение RPN, RPN по компонентам и категориям.
+- Категории риска (круговая диаграмма).
+- Матрица S×O, матрица критичности (класс тяжести × уровень вероятности).
+- Рейтинг по количественной критичности Cm.
+- Граф зависимостей (компонент → отказ → причина → последствие).
+
+**Экспорт и отчёты**
+- **Excel** — несколько листов, включая полную таблицу FMECA.
+- **PDF** — краткий отчёт с таблицами.
+- **Полный отчёт (PDF)** — все записи по разделам + 7 графиков.
+
+**Демо-данные**
+- При первом запуске (пустая база) автоматически загружается **50 записей** (сценарии ЦОД/серверов).
+- Повторная загрузка: **Справочники → Загрузить демо (50 записей)**.
+
+### RPN до и после мер
+
+| Показатель | Откуда берутся оценки | Формула |
+|------------|------------------------|---------|
+| **RPN до мер** | Основные S, O, D (верх блока формы) | S × O × D |
+| **RPN после мер** | Остаточные S, O, D (низ формы) | S_ост × O_ост × D_ост |
+| **Снижение риска** | Разница | RPN до − RPN после |
+
+Если в БД сохранён явный «остаточный RPN», он используется в приоритете; иначе значение пересчитывается из остаточных S/O/D.
 
 ### Требования
 
-- Python 3.10+ (рекомендуется актуальная стабильная ветка 3.x).
-- Зависимости из `requirements.txt`: `pandas`, `matplotlib`, `openpyxl`, `reportlab`, `seaborn`, `networkx`.
+- Python **3.10+**
+- Зависимости: `pandas`, `matplotlib`, `openpyxl`, `reportlab`, `seaborn`, `networkx` (см. `requirements.txt`)
 
-### Установка
+### Установка и запуск
 
 ```bash
 cd fmeca_app
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-На Linux/macOS активация: `source .venv/bin/activate`.
-
-### Запуск приложения
-
-```bash
 python main.py
 ```
 
-База данных по умолчанию создаётся в `data/fmea.db` (каталог создаётся автоматически).
+База данных: `data/fmea.db` (каталог создаётся автоматически).
 
-### Структура проекта (кратко)
+### Интерфейс (кратко)
+
+| Элемент | Действие |
+|---------|----------|
+| Добавить / Изменить / Удалить | CRUD записей FMEA |
+| Экспорт Excel / PDF / Полный отчёт | Выгрузка данных |
+| Графики | Меню визуализаций |
+| Справочники | Просмотр, добавление, удаление справочников; демо-данные |
+| Качество анализа | Полнота и проблемные записи |
+| Объяснить риск | Текст по выбранной строке |
+| Пересчитать RPN | Массовый пересчёт в БД |
+
+### Листы Excel при экспорте
+
+| Лист | Содержание |
+|------|------------|
+| FMEA Analysis | Основная таблица (S, O, D, RPN) |
+| FMECA полный | Все поля записи |
+| Количественная критичность | λ, α, β, t, Cm |
+| Сводка анализа | Статистика полноты и рисков |
+| До-После мер | RPN до / после / снижение |
+| FMECA Standardized | Сводный формат (англ. заголовки) |
+| Топ-20 по RPN / Cm | Приоритетные записи |
+| Статистика RPN, Справка | Сводки и пороги RPN |
+
+### Структура проекта
 
 | Файл / каталог | Назначение |
 |----------------|------------|
-| `main.py` | Точка входа, запуск GUI |
-| `gui.py` | Интерфейс пользователя |
-| `database.py` | SQLite, схема, миграции, CRUD |
-| `model.py` | Расчёты RPN, MIL, полнота, риски, отчётные DataFrame |
+| `main.py` | Точка входа |
+| `gui.py` | Интерфейс Tkinter |
+| `database.py` | SQLite: схема, миграции, CRUD, справочники |
+| `model.py` | RPN, Cm, полнота, DataFrame для отчётов |
 | `io_utils.py` | Импорт XML, экспорт Excel/PDF |
-| `reports.py` | Сборка полных отчётов |
-| `visualization.py` | Графики matplotlib/seaborn |
+| `reports.py` | Полный PDF-отчёт с графиками |
+| `visualization.py` | Графики matplotlib |
 | `graph_analysis.py` | Граф зависимостей (NetworkX) |
+| `demo_data.py` | Генерация 50 демо-записей |
+| `standards.py` | Пороги RPN, вспомогательные константы |
 | `tests/` | Модульные тесты (`unittest`) |
-| `fonts/` | TTF для PDF с кириллицей |
+| `fonts/` | Шрифты DejaVu для PDF с кириллицей |
 | `sample_fmeca.xml`, `new_sample.xml` | Примеры XML |
 
 ### Тесты
@@ -64,9 +124,9 @@ python main.py
 python -m unittest discover -s tests -v
 ```
 
-### Ориентиры по стандартам
+### Миграции БД
 
-В интерфейсе указаны ориентиры: **MIL-STD-1629A**, **IEC 60812**, **ГОСТ 27.310-95**, **ГОСТ Р ИСО/МЭК 31010**. Реализация носит учебно-практический характер; перед промышленным применением требуется сверка с актуальными редакциями нормативов вашей организации.
+Схема обновляется **без пересоздания** таблиц (add-only миграции в `database.py`). Старые файлы `fmea.db` остаются совместимыми.
 
 ---
 
@@ -74,55 +134,29 @@ python -m unittest discover -s tests -v
 
 ### Description
 
-A **desktop FMEA / FMECA** (Failure Mode, Effects, and Criticality Analysis) tool focused on IT hardware-style scenarios. Built with **Python**, **Tkinter** for the UI, **SQLite** for storage, plus import/export, reporting, and charts.
+A **desktop FMEA / FMECA** tool for IT infrastructure and data-center scenarios. **Python**, **Tkinter**, **SQLite**, with dictionaries, extended FMECA fields, RPN and quantitative criticality (Cm), import/export, and reporting.
 
 ### Features
 
-- Failure records linked to system, subsystem, component, and reference data (categories, failure types, causes, effects).
-- **RPN** (S × O × D) and **MIL mode criticality** when λ, α, β, and mission time are provided.
-- Extended FMECA fields: function, local / next-higher / end effects, actions, and residual risk.
-- **XML** import; **Excel** and **PDF** export (Cyrillic via fonts in `fonts/`).
-- Full PDF report with charts, criticality views, and a dependency graph.
-- **Analysis quality** dashboard, **risk explanation** text, filtering and pruning of records that do not match the current FMECA structure.
-- **Add-only database migrations** to keep older `fmea.db` files usable.
+- Failure records with system / subsystem / component hierarchy and reference data.
+- **RPN** = S × O × D; **Cm** = λ × α × β × t when reliability inputs are provided.
+- Extended fields, residual S/O/D, before/after RPN in reports.
+- Editable dictionaries with add/delete (delete blocked if a value is in use).
+- Quality dashboard, risk explanation, dependency graph, seven chart types.
+- **50 demo records** on first run (empty database); reload via **Dictionaries → Load demo (50 records)**.
+- Excel/PDF/full PDF export with comprehensive FMECA sheets.
 
-### Requirements
-
-- Python 3.10+ recommended.
-- Dependencies listed in `requirements.txt`: `pandas`, `matplotlib`, `openpyxl`, `reportlab`, `seaborn`, `networkx`.
-
-### Installation
+### Requirements & run
 
 ```bash
 cd fmeca_app
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### Run the application
-
-```bash
 python main.py
 ```
 
-The default database path is `data/fmea.db` (the folder is created if missing).
-
-### Project layout (short)
-
-| Path | Role |
-|------|------|
-| `main.py` | Entry point |
-| `gui.py` | Tkinter UI |
-| `database.py` | SQLite schema, migrations, CRUD |
-| `model.py` | RPN, MIL, completeness, risk helpers, reporting DataFrames |
-| `io_utils.py` | XML import, Excel/PDF export |
-| `reports.py` | Full report pipeline |
-| `visualization.py` | Matplotlib / Seaborn charts |
-| `graph_analysis.py` | Dependency graph (NetworkX) |
-| `tests/` | Unit tests (`unittest`) |
-| `fonts/` | TTF fonts for PDF Cyrillic |
-| `sample_fmeca.xml`, `new_sample.xml` | Sample XML inputs |
+Default database: `data/fmea.db`.
 
 ### Tests
 
@@ -130,12 +164,14 @@ The default database path is `data/fmea.db` (the folder is created if missing).
 python -m unittest discover -s tests -v
 ```
 
-### Standards note
+### Before / after RPN
 
-The UI references **MIL-STD-1629A**, **IEC 60812**, and related Russian GOSTs as **guidance**. The implementation is educational/practical; validate against your organization’s current standards before production use.
+- **Before actions:** main S, O, D → RPN = S × O × D  
+- **After actions:** residual S, O, D → residual RPN = S × O × D  
+- **Risk reduction:** before − after  
 
 ---
 
 ## License / Лицензия
 
-Font files in `fonts/` are subject to their own **LICENSE** and **COPYRIGHT** files (e.g. DejaVu). Application code license is as specified by the project author.
+Font files in `fonts/` are subject to their own **LICENSE** and **COPYRIGHT** (DejaVu). Application code license is as specified by the project author.
