@@ -26,3 +26,8 @@ htmlcov/
 
 # Accidental outputs
 _mil_matrix_smoke.png
+
+# PyInstaller
+build/
+dist/
+*.spec.bak

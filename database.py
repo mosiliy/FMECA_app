@@ -7,6 +7,7 @@ import sqlite3
 from typing import List, Tuple, Optional, Dict
 import os
 from model import FMEAModel
+from app_paths import get_database_path
 
 
 class Database:
@@ -94,9 +95,13 @@ class Database:
         ("residual_rpn", "INTEGER DEFAULT 0"),
     ]
     
-    def __init__(self, db_path: str = "data/fmea.db"):
+    def __init__(self, db_path: Optional[str] = None):
         """Инициализация подключения к БД."""
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        if db_path is None:
+            db_path = str(get_database_path())
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         
         self.db_path = db_path
         self.connection = sqlite3.connect(db_path)

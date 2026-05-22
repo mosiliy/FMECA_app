@@ -16,6 +16,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import os
 
+from app_paths import get_fonts_dir
 from standards import REPORT_TITLE, REPORT_SUBTITLE, format_rpn_thresholds_plain
 from model import FMEAModel
 
@@ -23,15 +24,13 @@ from model import FMEAModel
 class IOUtils:
     """Утилиты для импорта и экспорта данных с поддержкой кириллицы."""
     
-    # Путь к шрифтам
-    FONTS_DIR = "fonts"
-    
     @staticmethod
     def _register_fonts():
         """Регистрация TTF шрифтов для поддержки русского языка."""
         try:
-            font_path_regular = os.path.join(IOUtils.FONTS_DIR, "DejaVuSans.ttf")
-            font_path_bold = os.path.join(IOUtils.FONTS_DIR, "DejaVuSans-Bold.ttf")
+            fonts_dir = str(get_fonts_dir())
+            font_path_regular = os.path.join(fonts_dir, "DejaVuSans.ttf")
+            font_path_bold = os.path.join(fonts_dir, "DejaVuSans-Bold.ttf")
             
             if os.path.exists(font_path_regular):
                 pdfmetrics.registerFont(TTFont('DejaVuSans', font_path_regular))
